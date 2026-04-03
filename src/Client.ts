@@ -809,7 +809,7 @@ export class Client extends EventEmitter {
             throw new Error("Could not convert key to X25519!");
         }
 
-        this.host = options?.host || "api.vex.chat";
+        this.host = options?.host || "api.vex.wtf";
         const dbFileName = options?.inMemoryDb
             ? ":memory:"
             : XUtils.encodeHex(this.signKeys.publicKey) + ".sqlite";
