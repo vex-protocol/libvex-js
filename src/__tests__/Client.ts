@@ -6,12 +6,16 @@ import { Client, IChannel, IClientOptions, IMessage, IServer, IUser } from "..";
 
 let clientA: Client | null = null;
 
+const isCI = !!process.env.CI;
+
 const clientOptions: IClientOptions = {
     inMemoryDb: true,
     logLevel: "error",
     dbLogLevel: "error",
-    // host: "localhost:16777",
-    // unsafeHttp: true,
+    ...(!isCI && {
+        host: "localhost:16777",
+        unsafeHttp: true,
+    }),
 };
 
 beforeAll(async () => {
