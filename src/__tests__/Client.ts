@@ -6,16 +6,47 @@ import { Client, IChannel, IClientOptions, IMessage, IServer, IUser } from "..";
 
 let clientA: Client | null = null;
 
-const isCI = !!process.env.CI;
+/**
+ * Tests use production api.vex.wtf by default (Client default when host is omitted).
+ * Override with API_URL, e.g. API_URL=http://localhost:16777 or API_URL=localhost:16777
+ */
+function isProbablyLocalHost(host: string): boolean {
+    const h = host.toLowerCase();
+    return (
+        h.startsWith("localhost:") ||
+        h === "localhost" ||
+        h.startsWith("127.0.0.1") ||
+        h.startsWith("[::1]") ||
+        h.startsWith("::1")
+    );
+}
+
+function apiUrlOverrideFromEnv():
+    | Pick<IClientOptions, "host" | "unsafeHttp">
+    | undefined {
+    const raw = process.env.API_URL?.trim();
+    if (!raw) {
+        return undefined;
+    }
+    if (/^https?:\/\//i.test(raw)) {
+        const u = new URL(raw);
+        return {
+            host: u.host,
+            unsafeHttp: u.protocol === "http:",
+        };
+    }
+    const host = raw.replace(/^\/+/, "");
+    return {
+        host,
+        unsafeHttp: isProbablyLocalHost(host),
+    };
+}
 
 const clientOptions: IClientOptions = {
     inMemoryDb: true,
     logLevel: "error",
     dbLogLevel: "error",
-    ...(!isCI && {
-        host: "localhost:16777",
-        unsafeHttp: true,
-    }),
+    ...apiUrlOverrideFromEnv(),
 };
 
 beforeAll(async () => {
