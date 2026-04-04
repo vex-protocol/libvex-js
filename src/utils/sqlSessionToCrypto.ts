@@ -1,10 +1,9 @@
 import { XUtils } from "@vex-chat/crypto";
-// import { XTypes } from "@vex-chat/types";
-import * as XTypes from "@vex-chat/types";
+import { XTypes } from "@vex-chat/types";
 
 export function sqlSessionToCrypto(
-    session: XTypes.ISessionSQL
-): XTypes.ISessionCrypto {
+    session: XTypes.SQL.ISession
+): XTypes.CRYPTO.ISession {
     return {
         sessionID: session.sessionID,
         userID: session.userID,

@@ -1,20 +1,18 @@
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+// TODO: convert to es6 format
 module.exports = {
-  preset: "ts-jest",
-  testEnvironment: "node",
-  roots: ["<rootDir>/src"],
-  testMatch: [
-    "**/__tests__/**/*.+(ts|tsx|js)",
-    "**/?(*.)+(spec|test).+(ts|tsx|js)"
-  ],
-  transform: {
-    "^.+\\.(ts|tsx)$": [
-      "ts-jest",
-      {
-        tsconfig: "tsconfig.json"
-      }
-    ]
-  },
-  verbose: true,
-  maxWorkers: 1
-};
+    "roots": [
+      "<rootDir>/src"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.+(ts|tsx|js)",
+      "**/?(*.)+(spec|test).+(ts|tsx|js)"
+    ],
+    "transform": {
+      "^.+\\.(ts|tsx)$": "ts-jest"
+    },
+    // "setupFiles": [
+    //   "./scripts/testSpire.ts"
+    // ],
+    "maxWorkers": 1,
+    "verbose": true,
+  }
