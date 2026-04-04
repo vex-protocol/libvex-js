@@ -1,7 +1,6 @@
-import * as XTypes from "@vex-chat/types";
+import { XTypes } from "@vex-chat/types";
 import { EventEmitter } from "events";
 import { IMessage, ISession } from ".";
-
 /**
  * This is the class you must implement to store and retrieve
  * important data for the key exchange and messaging processes if you want to
@@ -86,9 +85,9 @@ export interface IStorage extends EventEmitter {
      * as indicated by the oneTime parameter.
      */
     savePreKeys: (
-        preKeys: XTypes.IPreKeysCrypto[],
+        preKeys: XTypes.CRYPTO.IPreKeys[],
         oneTime: boolean
-    ) => Promise<XTypes.IPreKeysSQL[]>;
+    ) => Promise<XTypes.SQL.IPreKeys[]>;
     /**
      * Gets your set of main prekeys. You only have one at a time.
      * Returns null if the prekeys have not been saved yet.
@@ -96,13 +95,13 @@ export interface IStorage extends EventEmitter {
      * @param preKeys the set of prekeys to save.
      * @param oneTime whether or not the set of prekeys is a one time set.
      */
-    getPreKeys: () => Promise<XTypes.IPreKeysCrypto | null>;
+    getPreKeys: () => Promise<XTypes.CRYPTO.IPreKeys | null>;
     /**
      * Gets a set of one time keys by index number.
      *
      * @param index The index number of the prekey to fetch.
      */
-    getOneTimeKey: (index: number) => Promise<XTypes.IPreKeysCrypto | null>;
+    getOneTimeKey: (index: number) => Promise<XTypes.CRYPTO.IPreKeys | null>;
     /**
      * Deletes a set of one time keys by index number.
      *
@@ -116,7 +115,7 @@ export interface IStorage extends EventEmitter {
      */
     getSessionByPublicKey: (
         publicKey: Uint8Array
-    ) => Promise<XTypes.ISessionCrypto | null>;
+    ) => Promise<XTypes.CRYPTO.ISession | null>;
     /**
      * Gets all encryption sessions.
      */
@@ -128,7 +127,7 @@ export interface IStorage extends EventEmitter {
      */
     getSessionByDeviceID: (
         deviceID: string
-    ) => Promise<XTypes.ISessionCrypto | null>;
+    ) => Promise<XTypes.CRYPTO.ISession | null>;
     /**
      * Saves an encryption session.
      *
@@ -141,8 +140,8 @@ export interface IStorage extends EventEmitter {
      */
 
     init: () => Promise<void>;
-    getDevice: (deviceID: string) => Promise<XTypes.IDevice | null>;
-    saveDevice: (device: XTypes.IDevice) => Promise<void>;
+    getDevice: (deviceID: string) => Promise<XTypes.SQL.IDevice | null>;
+    saveDevice: (device: XTypes.SQL.IDevice) => Promise<void>;
 
     /**
      * Emit this event when init has complete.

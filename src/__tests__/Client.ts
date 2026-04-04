@@ -1,18 +1,21 @@
-// import { sleep } from "@extrahash/sleep";
-import { setTimeout as sleep } from "node:timers/promises";
-import * as fs from "fs";
-import * as _ from "lodash";
-import * as path from "path";
+import { sleep } from "@extrahash/sleep";
+// tslint:disable-next-line: no-implicit-dependencies
+import fs from "fs";
+import _ from "lodash";
 import { Client, IChannel, IClientOptions, IMessage, IServer, IUser } from "..";
 
 let clientA: Client | null = null;
+
+const isCI = !!process.env.CI;
 
 const clientOptions: IClientOptions = {
     inMemoryDb: true,
     logLevel: "error",
     dbLogLevel: "error",
-    host: "localhost:16777",
-    unsafeHttp: true,
+    ...(!isCI && {
+        host: "localhost:16777",
+        unsafeHttp: true,
+    }),
 };
 
 beforeAll(async () => {
@@ -24,12 +27,6 @@ beforeAll(async () => {
     }
 });
 
-afterAll(async () => {
-    if (clientA) {
-        await clientA.close();
-    }
-});
-
 describe("Perform client tests", () => {
     let createdServer: IServer | null = null;
     let createdChannel: IChannel | null = null;
@@ -38,44 +35,29 @@ describe("Perform client tests", () => {
     const password = "hunter2";
 
     let userDetails: IUser | null = null;
-
-    test("Register", async () => {
+    test("Register", async (done) => {
         const [user, err] = await clientA!.register(username, password);
         if (err) {
             throw err;
         }
         userDetails = user;
-        expect(user).toBeDefined();
-        expect(user!.username).toBe(username);
+        expect(user!.username === username).toBe(true);
+        done();
     });
 
-    test("Login", async () => {
-        const err = await clientA!.login(username, password);
-        if (err) {
-            console.error(JSON.stringify(err));
-            throw new Error(err.toString());
-        }
-        expect(clientA!.hasLoggedIn).toBe(false); // It becomes true after internal checks, usually
+    test("Login", () => {
+        return login(clientA!, username, password);
     });
 
-    test("Connect", async () => {
-        const connectPromise = new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error("Connection timeout after 10s"));
-            }, 10000);
-
-            clientA!.once("connected", () => {
-                clearTimeout(timeout);
-                resolve();
-            });
+    test("Connect", async (done) => {
+        clientA!.on("connected", () => {
+            done();
         });
 
-        clientA!.connect();
+        await clientA!.connect();
+    });
 
-        await connectPromise;
-    }, 15000);
-
-    test("Server operations", async () => {
+    test("Server operations", async (done) => {
         const permissions = await clientA!.permissions.retrieve();
         expect(permissions).toEqual([]);
 
@@ -93,10 +75,10 @@ describe("Perform client tests", () => {
 
         // make another server to be used by channel tests
         createdServer = await clientA!.servers.create("Channel Test Server");
-        expect(createdServer).toBeDefined();
+        done();
     });
 
-    test("Channel operations", async () => {
+    test("Channel operations", async (done) => {
         const servers = await clientA!.servers.retrieve();
         const [testServer] = servers;
 
@@ -108,69 +90,51 @@ describe("Perform client tests", () => {
         await clientA!.channels.delete(channel.channelID);
 
         const channels = await clientA!.channels.retrieve(testServer.serverID);
-        // Note: Depending on backend implementation, this might be 0 if the delete worked,
-        // or 1 if we are testing creation persistence. Assuming the previous delete removed it,
-        // we create a new one for the test variable.
+        expect(channels.length).toBe(1);
 
-        const newChannel = await clientA!.channels.create(
-            "Persistent Channel",
-            testServer.serverID
-        );
-        createdChannel = newChannel;
-
-        const updatedChannels = await clientA!.channels.retrieve(
-            testServer.serverID
-        );
-        expect(updatedChannels.length).toBeGreaterThanOrEqual(1);
+        createdChannel = channels[0];
 
         const retrievedByIDChannel = await clientA!.channels.retrieveByID(
-            newChannel.channelID
+            channels[0].channelID
         );
-        expect(newChannel.channelID).toEqual(retrievedByIDChannel?.channelID);
+        expect(channels[0].channelID === retrievedByIDChannel?.channelID).toBe(
+            true
+        );
+        done();
     });
 
-    test("Direct messaging", async () => {
+    test("Direct messaging", async (done) => {
         const received: string[] = [];
-        const me = clientA!.me.user();
 
-        // Create a promise that resolves when we get both messages
-        const messagePromise = new Promise<void>((resolve, reject) => {
-            const onMessage = (message: IMessage) => {
-                try {
-                    if (!message.decrypted) {
-                        // eslint-disable-next-line no-console
-                        console.error("Message failed to decrypt", message);
-                    }
+        const receivedAllExpected = () =>
+            received.includes("initial") && received.includes("subsequent");
 
-                    if (
-                        message.direction === "incoming" &&
-                        message.decrypted &&
-                        message.group === null
-                    ) {
-                        received.push(message.message);
-                        if (
-                            received.includes("initial") &&
-                            received.includes("subsequent")
-                        ) {
-                            clientA!.off("message", onMessage);
-                            resolve();
-                        }
-                    }
-                } catch (e) {
-                    reject(e);
+        const onMessage = (message: IMessage) => {
+            if (!message.decrypted) {
+                throw new Error("Message failed to decrypt.");
+            }
+            if (
+                message.direction === "incoming" &&
+                message.decrypted &&
+                message.group === null
+            ) {
+                received.push(message.message);
+                if (receivedAllExpected()) {
+                    clientA!.off("message", onMessage);
+                    done();
                 }
-            };
-            clientA!.on("message", onMessage);
-        });
+            }
+        };
+        clientA!.on("message", onMessage);
+
+        const me = clientA!.me.user();
 
         await clientA!.messages.send(me.userID, "initial");
         await sleep(500);
         await clientA!.messages.send(me.userID, "subsequent");
-
-        await messagePromise;
     });
 
-    test("File operations", async () => {
+    test("File operations", async (done) => {
         const createdFile = Buffer.alloc(1000);
         createdFile.fill(0);
 
@@ -179,67 +143,40 @@ describe("Perform client tests", () => {
             createdDetails.fileID,
             key
         );
-
         if (!fetchedFileRes) {
             throw new Error("Error fetching file.");
         }
 
         const { data, details } = fetchedFileRes;
 
-        // expect(Buffer.compare(createdFile, data)).toBe(0);
-        // expect(createdFile.equals(Buffer.from(data as any))).toBe(true);
-        // expect(createdFile.equals(data as Buffer)).toBe(true);
-        // expect(Buffer.compare(createdFile, Buffer.from(data))).toBe(0);
-        // function buffersEqual(a: Buffer, b: Buffer | Uint8Array): boolean {
-        // const bBuf = Buffer.isBuffer(b) ? b : Buffer.from(b);
-        // return a.equals(bBuf);
-        // }
-        // expect(buffersEqual(createdFile, data)).toBe(true);
-        expect((createdFile as any).equals(data)).toBe(true);
-        // expect(createdFile.equals(data as unknown as Buffer)).toBe(true);
-        expect(createdDetails.nonce).toEqual(details.nonce);
+        expect(_.isEqual(createdFile, data)).toBe(true);
+        expect(_.isEqual(createdDetails.nonce, details.nonce)).toBe(true);
+
+        done();
     });
 
-    test("Upload an emoji", async () => {
-        // Ensure path resolution works regardless of where test is run
-        const filePath = path.resolve(__dirname, "triggered.png");
-
-        // Mock file creation if it doesn't exist for the test environment
-        if (!fs.existsSync(filePath)) {
-            fs.writeFileSync(filePath, Buffer.alloc(1024) as any);
-        }
-
-        const buf = (fs.readFileSync(filePath) as unknown) as Buffer;
+    test("Upload an emoji", async (done) => {
+        const buf = fs.readFileSync("./src/__tests__/triggered.png");
         const emoji = await clientA!.emoji.create(
             buf,
             "triggered",
             createdServer!.serverID
         );
-
         if (!emoji) {
             throw new Error("Couldn't create emoji.");
         }
-
         const list = await clientA?.emoji.retrieveList(createdServer!.serverID);
-        // Depending on server implementation, list might contain more than just this one
-        const found = list?.find((e) => e.emojiID === emoji.emojiID);
-        expect(found).toBeDefined();
-        expect(found).toEqual(emoji);
+        expect([emoji]).toEqual(list);
+        done();
     });
 
-    test("Upload an avatar", async () => {
-        const filePath = path.resolve(__dirname, "ghost.png");
-
-        // Mock file creation if it doesn't exist
-        if (!fs.existsSync(filePath)) {
-            fs.writeFileSync(filePath, Buffer.alloc(1024) as any);
-        }
-
-        const buf = fs.readFileSync(filePath);
+    test("Upload an avatar", async (done) => {
+        const buf = fs.readFileSync("./src/__tests__/ghost.png");
         await clientA!.me.setAvatar(buf);
+        done();
     });
 
-    test("Create invite", async () => {
+    test("Create invite", async (done) => {
         if (!createdServer) {
             throw new Error("Server not created, can't do invite test.");
         }
@@ -248,55 +185,44 @@ describe("Perform client tests", () => {
             createdServer.serverID,
             "1h"
         );
-        expect(invite).toBeDefined();
-
         await clientA?.invites.redeem(invite.inviteID);
 
         const serverInviteList = await clientA?.invites.retrieve(
             createdServer.serverID
         );
-        expect(serverInviteList).toBeDefined();
+        done();
     });
 
-    test("Group messaging", async () => {
+    test("Group messaging", async (done) => {
         const received: string[] = [];
 
-        const messagePromise = new Promise<void>((resolve, reject) => {
-            const onGroupMessage = (message: IMessage) => {
-                try {
-                    if (!message.decrypted) {
-                        // eslint-disable-next-line no-console
-                        console.error("Message failed to decrypt", message);
-                    }
-                    if (
-                        message.direction === "incoming" &&
-                        message.decrypted &&
-                        message.group !== null
-                    ) {
-                        received.push(message.message);
-                        if (
-                            received.includes("initial") &&
-                            received.includes("subsequent")
-                        ) {
-                            clientA!.off("message", onGroupMessage);
-                            resolve();
-                        }
-                    }
-                } catch (e) {
-                    reject(e);
+        const receivedAllExpected = () =>
+            received.includes("initial") && received.includes("subsequent");
+
+        const onGroupMessage = (message: IMessage) => {
+            if (!message.decrypted) {
+                throw new Error("Message failed to decrypt.");
+            }
+            if (
+                message.direction === "incoming" &&
+                message.decrypted &&
+                message.group !== null
+            ) {
+                received.push(message.message);
+                if (receivedAllExpected()) {
+                    done();
                 }
-            };
-            clientA!.on("message", onGroupMessage);
-        });
+            }
+        };
+
+        clientA!.on("message", onGroupMessage);
 
         await clientA!.messages.group(createdChannel!.channelID, "initial");
         await sleep(500);
         await clientA!.messages.group(createdChannel!.channelID, "subsequent");
-
-        await messagePromise;
     });
 
-    test("Message history operations", async () => {
+    test("Message history operations", async (done) => {
         const history = await clientA?.messages.retrieve(
             clientA.me.user().userID
         );
@@ -304,86 +230,91 @@ describe("Perform client tests", () => {
             throw new Error("No history found!");
         }
 
-        // We expect some history from the "Direct messaging" test above
-        expect(history.length).toBeGreaterThan(0);
-
         await clientA?.messages.delete(clientA.me.user().userID);
 
         const postHistory = await clientA?.messages.retrieve(
             clientA.me.user().userID
         );
         expect(postHistory?.length).toBe(0);
+        done();
     });
 
-    // TODO: Fix multiple instance bugs (cookies/storage overlap) before enabling
-    /*
-    test("Register a second device", async () => {
-        const clientB = await Client.create(undefined, {
-            ...clientOptions,
-            logLevel: "info",
-        });
+    // TODO: running multiple instances of the client introduces bugs.
+    // cookies get overwritten for all three when you set the device or user cookie.
+    // find out how to fix this.
 
-        // Login with same credentials
-        const loginErr = await clientB.login(username, password);
-        if (loginErr) throw loginErr;
+    // test("Register a second device", async (done) => {
+    //     jest.setTimeout(10000);
+    //     const clientB = await Client.create(undefined, {
+    //         ...clientOptions,
+    //         logLevel: "info",
+    //     });
+    //     await clientB.login(username, password);
+    //     await clientB.connect();
 
-        await clientB.connect();
+    //     clientB.on("message", (message) => console.log(message))
 
-        const otherUsername = Client.randomUsername();
-        const otherUser = await Client.create(undefined, clientOptions);
+    //     const otherUsername = Client.randomUsername();
+    //     const otherUser = await Client.create(undefined, clientOptions);
+    //     await otherUser.register(otherUsername, password);
+    //     await otherUser.login(otherUsername, password);
+    //     await otherUser.connect();
 
-        const [regUser, regErr] = await otherUser.register(otherUsername, password);
-        if (regErr) throw regErr;
+    //     await sleep(1000);
 
-        const otherLoginErr = await otherUser.login(otherUsername, password);
-        if (otherLoginErr) throw otherLoginErr;
+    //     const received: string[] = [];
+    //     const receivedAllExpected = () => {
+    //         console.log(received);
+    //         return (
+    //             received.includes("initialA") &&
+    //             received.includes("initialB") &&
+    //             received.includes("subsequentA") &&
+    //             received.includes("subsequentB") &&
+    //             received.includes("forwardInitialB") &&
+    //             received.includes("forwardSubsequentB")
+    //         );
+    //     };
 
-        await otherUser.connect();
+    //     clientB.on("message", (message) => {
+    //         received.push(message.message + "B");
+    //         if (receivedAllExpected()) {
+    //             done();
+    //         }
+    //     });
 
-        await sleep(1000);
+    //     clientA?.on("message", (message) => {
+    //         if (
+    //             message.direction === "incoming" ||
+    //             message.authorID === clientA?.me.user().userID
+    //         ) {
+    //             received.push(message.message + "A");
+    //             if (receivedAllExpected()) {
+    //                 done();
+    //             }
+    //         }
+    //     });
 
-        const received: string[] = [];
-
-        const receivedAllExpected = () => {
-            return (
-                received.includes("initialA") &&
-                received.includes("initialB") &&
-                received.includes("subsequentA") &&
-                received.includes("subsequentB") &&
-                received.includes("forwardInitialB") &&
-                received.includes("forwardSubsequentB")
-            );
-        };
-
-        const testPromise = new Promise<void>((resolve) => {
-             clientB.on("message", (message) => {
-                received.push(message.message + "B");
-                if (receivedAllExpected()) resolve();
-            });
-
-            clientA?.on("message", (message) => {
-                if (
-                    message.direction === "incoming" ||
-                    message.authorID === clientA?.me.user().userID
-                ) {
-                    received.push(message.message + "A");
-                    if (receivedAllExpected()) resolve();
-                }
-            });
-        });
-
-        await otherUser.messages.send(clientA!.me.user().userID, "initial");
-        await sleep(500);
-        await otherUser.messages.send(clientA!.me.user().userID, "subsequent");
-        await sleep(500);
-        await clientA!.messages.send(otherUser!.me.user().userID, "forwardInitial");
-        await sleep(500);
-        await clientA!.messages.send(
-            otherUser!.me.user().userID,
-            "forwardSubsequent"
-        );
-
-        await testPromise;
-    });
-    */
+    //     otherUser.messages.send(clientA!.me.user().userID, "initial");
+    //     await sleep(500);
+    //     otherUser.messages.send(clientA!.me.user().userID, "subsequent");
+    //     await sleep(500);
+    //     clientA!.messages.send(otherUser!.me.user().userID, "forwardInitial");
+    //     await sleep(500);
+    //     clientA!.messages.send(
+    //         otherUser!.me.user().userID,
+    //         "forwardSubsequent"
+    //     );
+    // });
 });
+
+/**
+ * @hidden
+ */
+const login = async (client: Client, username: string, password: string) => {
+    const err = await client.login(username, password);
+    if (err) {
+        console.error(JSON.stringify(err));
+        await client.close();
+        throw new Error(err.toString());
+    }
+};
