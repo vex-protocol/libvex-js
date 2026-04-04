@@ -78,5 +78,9 @@
     "bugs": {
         "url": "https://github.com/vex-chat/vex-js/issues"
     },
-    "homepage": "https://github.com/vex-chat/vex-js#readme"
+    "homepage": "https://github.com/vex-chat/vex-js#readme",
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    }
 }
