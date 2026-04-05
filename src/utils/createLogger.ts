@@ -1,5 +1,5 @@
 import winston from "winston";
-import { IClientOptions } from "..";
+import type { IClientOptions } from "../index.js";
 
 /**
  * @ignore

@@ -1,15 +1,15 @@
 import { sleep } from "@extrahash/sleep";
 import { XKeyConvert, XUtils } from "@vex-chat/crypto";
-import { XTypes } from "@vex-chat/types";
+import type { IDevice, IPreKeysCrypto, IPreKeysSQL, ISessionCrypto, ISessionSQL } from "@vex-chat/types";
 import { EventEmitter } from "events";
-import knex from "knex";
+import knex, { type Knex } from "knex";
 import parseDuration from "parse-duration";
 import nacl from "tweetnacl";
 import winston from "winston";
-import { IClientOptions, IMessage } from ".";
-import { IStorage } from "./IStorage";
-import { createLogger } from "./utils/createLogger";
-import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto";
+import type { IClientOptions, IMessage } from "./index.js";
+import type { IStorage } from "./IStorage.js";
+import { createLogger } from "./utils/createLogger.js";
+import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
 
 /**
  * The default IStorage() implementation, using knex and sqlite3 driver
@@ -20,7 +20,7 @@ export class Storage extends EventEmitter implements IStorage {
     public ready: boolean = false;
     private closing: boolean = false;
     private dbPath: string;
-    private db: knex<any, unknown[]>;
+    private db: Knex;
     private log: winston.Logger;
     private idKeys: nacl.BoxKeyPair;
     private saveHistory: boolean;
@@ -42,7 +42,7 @@ export class Storage extends EventEmitter implements IStorage {
 
         this.log.info("Opening database file at " + this.dbPath);
         this.db = knex({
-            client: "sqlite3",
+            client: "better-sqlite3",
             connection: {
                 filename: this.dbPath,
             },
@@ -196,9 +196,9 @@ export class Storage extends EventEmitter implements IStorage {
     }
 
     public async savePreKeys(
-        preKeys: XTypes.CRYPTO.IPreKeys[],
+        preKeys: IPreKeysCrypto[],
         oneTime: boolean
-    ): Promise<XTypes.SQL.IPreKeys[]> {
+    ): Promise<IPreKeysSQL[]> {
         const addedIndexes: number[] = [];
 
         await this.untilReady();
@@ -220,12 +220,12 @@ export class Storage extends EventEmitter implements IStorage {
             addedIndexes.push(index[0]);
         }
 
-        const addedKeys: XTypes.SQL.IPreKeys[] = (
+        const addedKeys: IPreKeysSQL[] = (
             await this.db
                 .from(oneTime ? "oneTimeKeys" : "preKeys")
                 .select()
                 .whereIn("index", addedIndexes)
-        ).map((key: XTypes.SQL.IPreKeys) => {
+        ).map((key: IPreKeysSQL) => {
             delete key.privateKey;
             return key;
         });
@@ -239,7 +239,7 @@ export class Storage extends EventEmitter implements IStorage {
 
     public async getSessionByPublicKey(
         publicKey: Uint8Array
-    ): Promise<XTypes.CRYPTO.ISession | null> {
+    ): Promise<ISessionCrypto | null> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getGroupHistory() will not complete."
@@ -248,7 +248,7 @@ export class Storage extends EventEmitter implements IStorage {
         }
         const str = XUtils.encodeHex(publicKey);
 
-        const rows: XTypes.SQL.ISession[] = await this.db
+        const rows: ISessionSQL[] = await this.db
             .from("sessions")
             .select()
             .where({ publicKey: str })
@@ -262,7 +262,7 @@ export class Storage extends EventEmitter implements IStorage {
         }
         const [session] = rows;
 
-        const wsSession: XTypes.CRYPTO.ISession = sqlSessionToCrypto(session);
+        const wsSession: ISessionCrypto = sqlSessionToCrypto(session);
 
         this.log.debug(
             "getSessionByPublicKey() => " + JSON.stringify(wsSession, null, 4)
@@ -283,14 +283,14 @@ export class Storage extends EventEmitter implements IStorage {
             .where({ sessionID });
     }
 
-    public async getAllSessions(): Promise<XTypes.SQL.ISession[]> {
+    public async getAllSessions(): Promise<ISessionSQL[]> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getAllSessions() will not complete."
             );
             return [];
         }
-        const rows: XTypes.SQL.ISession[] = await this.db
+        const rows: ISessionSQL[] = await this.db
             .from("sessions")
             .select()
             .orderBy("lastUsed", "desc");
@@ -307,14 +307,14 @@ export class Storage extends EventEmitter implements IStorage {
 
     public async getSessionByDeviceID(
         deviceID: string
-    ): Promise<XTypes.CRYPTO.ISession | null> {
+    ): Promise<ISessionCrypto | null> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getSessionByUserID() will not complete."
             );
             return null;
         }
-        const rows: XTypes.SQL.ISession[] = await this.db
+        const rows: ISessionSQL[] = await this.db
             .from("sessions")
             .select()
             .where({ deviceID })
@@ -326,7 +326,7 @@ export class Storage extends EventEmitter implements IStorage {
         }
         const [session] = rows;
 
-        const wsSession: XTypes.CRYPTO.ISession = {
+        const wsSession: ISessionCrypto = {
             sessionID: session.sessionID,
             userID: session.userID,
             mode: session.mode,
@@ -339,7 +339,7 @@ export class Storage extends EventEmitter implements IStorage {
         return wsSession;
     }
 
-    public async getPreKeys(): Promise<XTypes.CRYPTO.IPreKeys | null> {
+    public async getPreKeys(): Promise<IPreKeysCrypto | null> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
@@ -347,7 +347,7 @@ export class Storage extends EventEmitter implements IStorage {
             );
             return null;
         }
-        const rows: XTypes.SQL.IPreKeys[] = await this.db
+        const rows: IPreKeysSQL[] = await this.db
             .from("preKeys")
             .select();
         if (rows.length === 0) {
@@ -355,7 +355,7 @@ export class Storage extends EventEmitter implements IStorage {
             return null;
         }
         const [preKeyInfo] = rows;
-        const preKeys: XTypes.CRYPTO.IPreKeys = {
+        const preKeys: IPreKeysCrypto = {
             keyPair: nacl.box.keyPair.fromSecretKey(
                 XUtils.decodeHex(preKeyInfo.privateKey!)
             ),
@@ -367,7 +367,7 @@ export class Storage extends EventEmitter implements IStorage {
 
     public async getOneTimeKey(
         index: number
-    ): Promise<XTypes.CRYPTO.IPreKeys | null> {
+    ): Promise<IPreKeysCrypto | null> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
@@ -375,7 +375,7 @@ export class Storage extends EventEmitter implements IStorage {
             );
             return null;
         }
-        const rows: XTypes.SQL.IPreKeys[] = await this.db
+        const rows: IPreKeysSQL[] = await this.db
             .from("oneTimeKeys")
             .select()
             .where({ index });
@@ -387,7 +387,7 @@ export class Storage extends EventEmitter implements IStorage {
         }
 
         const [otkInfo] = rows;
-        const otk: XTypes.CRYPTO.IPreKeys = {
+        const otk: IPreKeysCrypto = {
             keyPair: nacl.box.keyPair.fromSecretKey(
                 XUtils.decodeHex(otkInfo.privateKey!)
             ),
@@ -412,7 +412,7 @@ export class Storage extends EventEmitter implements IStorage {
             .where({ index });
     }
 
-    public async saveSession(session: XTypes.SQL.ISession) {
+    public async saveSession(session: ISessionSQL) {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, deleteOneTimeKey() will not complete."
@@ -483,7 +483,7 @@ export class Storage extends EventEmitter implements IStorage {
         }
     }
 
-    public async saveDevice(device: XTypes.SQL.IDevice) {
+    public async saveDevice(device: IDevice) {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, saveDevice() will not complete."
@@ -506,7 +506,7 @@ export class Storage extends EventEmitter implements IStorage {
         this.log.info("Initializing database tables.");
         try {
             if (!(await this.db.schema.hasTable("messages"))) {
-                await this.db.schema.createTable("messages", (table) => {
+                await this.db.schema.createTable("messages", (table: Knex.CreateTableBuilder) => {
                     table.string("nonce").primary();
                     table.string("sender").index();
                     table.string("recipient").index();
@@ -523,7 +523,7 @@ export class Storage extends EventEmitter implements IStorage {
             }
 
             if (!(await this.db.schema.hasTable("devices"))) {
-                await this.db.schema.createTable("devices", (table) => {
+                await this.db.schema.createTable("devices", (table: Knex.CreateTableBuilder) => {
                     table.string("deviceID").primary();
                     table.string("owner").index();
                     table.string("signKey");
@@ -534,7 +534,7 @@ export class Storage extends EventEmitter implements IStorage {
             }
 
             if (!(await this.db.schema.hasTable("sessions"))) {
-                await this.db.schema.createTable("sessions", (table) => {
+                await this.db.schema.createTable("sessions", (table: Knex.CreateTableBuilder) => {
                     table.string("sessionID").primary();
                     table.string("userID");
                     table.string("deviceID");
@@ -547,7 +547,7 @@ export class Storage extends EventEmitter implements IStorage {
                 });
             }
             if (!(await this.db.schema.hasTable("preKeys"))) {
-                await this.db.schema.createTable("preKeys", (table) => {
+                await this.db.schema.createTable("preKeys", (table: Knex.CreateTableBuilder) => {
                     table.increments("index");
                     table.string("keyID").unique();
                     table.string("userID");
@@ -558,7 +558,7 @@ export class Storage extends EventEmitter implements IStorage {
                 });
             }
             if (!(await this.db.schema.hasTable("oneTimeKeys"))) {
-                await this.db.schema.createTable("oneTimeKeys", (table) => {
+                await this.db.schema.createTable("oneTimeKeys", (table: Knex.CreateTableBuilder) => {
                     table.increments("index");
                     table.string("keyID").unique();
                     table.string("userID");
