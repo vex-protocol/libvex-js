@@ -1,3 +1,2 @@
 [tools]
-node = "20"
-"npm:yarn" = "latest"
+node = "24.14.0"
