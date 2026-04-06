@@ -84,22 +84,41 @@ export interface ICensoredUser {
  * IMessage is a chat message.
  */
 export interface IMessage {
+    /** Hex-encoded nonce used for message encryption. */
     nonce: string;
+    /** Globally unique message identifier. */
     mailID: string;
+    /** Sender device ID. */
     sender: string;
+    /** Recipient device ID. */
     recipient: string;
+    /** Plaintext message content (or empty string when decryption failed). */
     message: string;
+    /** Whether this message was received or sent by the current client. */
     direction: "incoming" | "outgoing";
+    /** Time the message was created/received. */
     timestamp: Date;
+    /** Whether payload decryption succeeded. */
     decrypted: boolean;
+    /** Channel ID for group messages; `null` for direct messages. */
     group: string | null;
+    /** `true` when this message was forwarded to another owned device. */
     forward: boolean;
+    /** User ID of the original author. */
     authorID: string;
+    /** User ID of the intended reader. */
     readerID: string;
 }
 
 /**
  * IPermission is a permission to a resource.
+ *
+ * Common fields:
+ * - `permissionID`: unique permission row ID
+ * - `userID`: user receiving this grant
+ * - `resourceID`: target server/channel/etc.
+ * - `resourceType`: type string for the resource
+ * - `powerLevel`: authorization level
  */
 export type { IPermission } from "@vex-chat/types";
 
@@ -108,39 +127,85 @@ export type { IPermission } from "@vex-chat/types";
  * encoded as hex strings.
  */
 export interface IKeys {
+    /** Public Ed25519 key as hex. */
     public: string;
+    /** Secret Ed25519 key as hex. Store securely. */
     private: string;
 }
 
+/**
+ * Device record associated with a user account.
+ *
+ * Common fields:
+ * - `deviceID`: unique device identifier
+ * - `owner`: owning user ID
+ * - `signKey`: signing public key
+ * - `name`: user-facing device name
+ * - `lastLogin`: last login timestamp string
+ * - `deleted`: soft-delete flag
+ */
 export type { IDevice } from "@vex-chat/types";
 
 /**
  * IUser is a single user on the vex platform.
+ *
+ * This is intentionally a censored user shape for client use, containing:
+ * - `userID`
+ * - `username`
+ * - `lastSeen`
  */
 export interface IUser extends ICensoredUser {}
 
 /**
  * ISession is an end to end encryption session with another peer.
+ *
+ * Key fields include:
+ * - `sessionID`
+ * - `userID`
+ * - `deviceID`
+ * - `mode` (`initiator` or `receiver`)
+ * - `publicKey` and `fingerprint`
+ * - `lastUsed`
+ * - `verified`
  */
 export interface ISession extends ISessionSQL {}
 
 /**
  * IChannel is a chat channel on a server.
+ *
+ * Common fields:
+ * - `channelID`
+ * - `serverID`
+ * - `name`
  */
 export type { IChannel } from "@vex-chat/types";
 
 /**
  * IServer is a single chat server.
+ *
+ * Common fields:
+ * - `serverID`
+ * - `name`
+ * - `icon` (optional URL/data)
  */
 export type { IServer } from "@vex-chat/types";
 
 /**
  * Ifile is an uploaded encrypted file.
+ *
+ * Common fields:
+ * - `fileID`: file identifier
+ * - `owner`: owner device/user ID
+ * - `nonce`: file encryption nonce (hex)
  */
 export interface IFile extends IFileSQL {}
 
 /**
  * IFileRes is a server response to a file retrieval request.
+ *
+ * Structure:
+ * - `details`: metadata (`IFile`)
+ * - `data`: decrypted binary bytes
  */
 export interface IFileRes extends IFileResponse {}
 
@@ -633,7 +698,13 @@ export class Client extends EventEmitter {
     }
 
     /**
-     * The IUsers interface contains methods for dealing with users.
+     * User operations.
+     *
+     * @example
+     * ```ts
+     * const [user] = await client.users.retrieve("alice");
+     * const familiarUsers = await client.users.familiars();
+     * ```
      */
     public users: IUsers = {
         /**
@@ -651,12 +722,24 @@ export class Client extends EventEmitter {
         familiars: this.getFamiliars.bind(this),
     };
 
+    /**
+     * Emoji operations.
+     *
+     * @example
+     * ```ts
+     * const emoji = await client.emoji.create(imageBuffer, "party", serverID);
+     * const list = await client.emoji.retrieveList(serverID);
+     * ```
+     */
     public emoji: IEmojis = {
         create: this.uploadEmoji.bind(this),
         retrieveList: this.retrieveEmojiList.bind(this),
         retrieve: this.retrieveEmojiByID.bind(this),
     };
 
+    /**
+     * Helpers for information/actions related to the currently authenticated account.
+     */
     public me: IMe = {
         /**
          * Retrieves your user information
@@ -676,15 +759,16 @@ export class Client extends EventEmitter {
         setAvatar: this.uploadAvatar.bind(this),
     };
 
+    /**
+     * Device management methods.
+     */
     public devices: IDevices = {
         retrieve: this.getDeviceByID.bind(this),
         register: this.registerDevice.bind(this),
         delete: this.deleteDevice.bind(this),
     };
 
-    /**
-     * The IMessages interface contains methods for dealing with messages.
-     */
+    /** File upload/download methods. */
     public files: IFiles = {
         /**
          * Uploads an encrypted file and returns the details and the secret key.
@@ -697,7 +781,7 @@ export class Client extends EventEmitter {
     };
 
     /**
-     * The IPermissions object contains all methods for dealing with permissions.
+     * Permission-management methods for the current user.
      */
     public permissions: IPermissions = {
         retrieve: this.getPermissions.bind(this),
@@ -705,7 +789,7 @@ export class Client extends EventEmitter {
     };
 
     /**
-     * The IModeration object contains all methods for dealing with permissions.
+     * Server moderation helper methods.
      */
     public moderation: IModeration = {
         kick: this.kickUser.bind(this),
@@ -713,7 +797,7 @@ export class Client extends EventEmitter {
     };
 
     /**
-     * The IInvites interface contains methods for dealing with invites.
+     * Invite-management methods.
      */
     public invites: IInvites = {
         create: this.createInvite.bind(this),
@@ -722,7 +806,14 @@ export class Client extends EventEmitter {
     };
 
     /**
-     * The IMessages interface contains methods for dealing with messages.
+     * Message operations (direct and group).
+     *
+     * @example
+     * ```ts
+     * await client.messages.send(userID, "Hello!");
+     * await client.messages.group(channelID, "Hello channel!");
+     * const dmHistory = await client.messages.retrieve(userID);
+     * ```
      */
     public messages: IMessages = {
         /**
@@ -756,7 +847,7 @@ export class Client extends EventEmitter {
     };
 
     /**
-     * The ISessions interface contains methods for dealing with encryption sessions.
+     * Encryption-session helpers.
      */
     public sessions: ISessions = {
         /**
@@ -783,6 +874,15 @@ export class Client extends EventEmitter {
         markVerified: this.markSessionVerified.bind(this),
     };
 
+    /**
+     * Server operations.
+     *
+     * @example
+     * ```ts
+     * const servers = await client.servers.retrieve();
+     * const created = await client.servers.create("Team Space");
+     * ```
+     */
     public servers: IServers = {
         /**
          * Retrieves all servers the logged in user has access to.
@@ -811,6 +911,9 @@ export class Client extends EventEmitter {
         leave: this.leaveServer.bind(this),
     };
 
+    /**
+     * Channel operations.
+     */
     public channels: IChannels = {
         /**
          * Retrieves all channels in a server.
