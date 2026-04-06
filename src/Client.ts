@@ -72,14 +72,6 @@ ax.defaults.responseType = "arraybuffer";
 
 const protocolMsgRegex = /��\w+:\w+��/g;
 
-export interface ICensoredUser {
-    lastSeen: number;
-    userID: string;
-    username: string;
-}
-
-// tslint:disable-next-line: no-var-requires
-
 /**
  * IMessage is a chat message.
  */
@@ -154,7 +146,22 @@ export type { IDevice } from "@vex-chat/types";
  * - `username`
  * - `lastSeen`
  */
-export interface IUser extends ICensoredUser {}
+export interface IUser {
+    /** Last-seen timestamp (unix epoch milliseconds). */
+    lastSeen: number;
+    /** User identifier. */
+    userID: string;
+    /** Public username. */
+    username: string;
+}
+
+/**
+ * Internal alias kept for implementation readability.
+ *
+ * @internal
+ * @hidden
+ */
+interface ICensoredUser extends IUser {}
 
 /**
  * ISession is an end to end encryption session with another peer.
@@ -214,7 +221,7 @@ export interface IFileRes extends IFileResponse {}
  */
 export interface IMe {
     /** Returns the currently authenticated user profile. */
-    user: () => ICensoredUser;
+    user: () => IUser;
     /** Returns metadata for the currently authenticated device. */
     device: () => IDevice;
     /** Uploads and sets a new avatar image for the current user. */
@@ -972,7 +979,7 @@ export class Client extends EventEmitter {
 
     private xKeyRing?: IXKeyRing;
 
-    private user?: ICensoredUser;
+    private user?: IUser;
     private device?: IDevice;
 
     private userRecords: Record<string, IUser> = {};
@@ -1143,7 +1150,7 @@ export class Client extends EventEmitter {
                     headers: { "Content-Type": "application/msgpack" },
                 },
             );
-            const { user, token }: { user: ICensoredUser; token: string } =
+            const { user, token }: { user: IUser; token: string } =
                 msgpack.decode(Buffer.from(res.data));
 
             const cookies = res.headers["set-cookie"];
@@ -1180,7 +1187,7 @@ export class Client extends EventEmitter {
      * ```
      */
     public async whoami(): Promise<{
-        user: ICensoredUser;
+        user: IUser;
         exp: number;
         token: string;
     }> {
@@ -1190,7 +1197,7 @@ export class Client extends EventEmitter {
         });
 
         const whoami: {
-            user: ICensoredUser;
+            user: IUser;
             exp: number;
             token: string;
         } = msgpack.decode(Buffer.from(res.data));
@@ -1258,7 +1265,7 @@ export class Client extends EventEmitter {
     public async register(
         username: string,
         password: string,
-    ): Promise<[ICensoredUser | null, Error | null]> {
+    ): Promise<[IUser | null, Error | null]> {
         while (!this.xKeyRing) {
             await sleep(100);
         }
@@ -2200,7 +2207,7 @@ export class Client extends EventEmitter {
 
     /* Get the currently logged in user. You cannot call this until 
     after the auth event is emitted. */
-    private getUser(): ICensoredUser {
+    private getUser(): IUser {
         if (!this.user) {
             throw new Error(
                 "You must wait until the auth event is emitted before fetching user details.",
@@ -2218,7 +2225,7 @@ export class Client extends EventEmitter {
         return this.device;
     }
 
-    private setUser(user: ICensoredUser): void {
+    private setUser(user: IUser): void {
         this.user = user;
     }
 
@@ -2227,7 +2234,7 @@ export class Client extends EventEmitter {
     and finally falls back to username. */
     private async retrieveUserDBEntry(
         userIdentifier: string,
-    ): Promise<[ICensoredUser | null, AxiosError | null]> {
+    ): Promise<[IUser | null, AxiosError | null]> {
         if (this.userRecords[userIdentifier]) {
             return [this.userRecords[userIdentifier], null];
         }
