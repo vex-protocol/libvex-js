@@ -174,6 +174,21 @@ interface ICensoredUser extends IUser {}
  * - `publicKey` and `fingerprint`
  * - `lastUsed`
  * - `verified`
+ *
+ * @example
+ * ```ts
+ * const session: ISession = {
+ *     sessionID: "f6e4fbd0-7222-4ba8-b799-c227faf5c8de",
+ *     userID: "f34f5e37-616f-4d3a-a437-e7c27c31cb73",
+ *     deviceID: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
+ *     mode: "initiator",
+ *     SK: "7d9afde6683ecc2d1f55e34e1b95de9d4042dfd4e8cda7fdf3f0f7e02fef8f9a",
+ *     publicKey: "d58f39dc4bcfe4e8ef022f34e8b6f4f6ddc9c4acee30c0d58f126aa5db3f61b0",
+ *     fingerprint: "05294b9aa81d0fd0ca12a4b585f531d8ef1f53f8ea3d0200a0df3f9c44a7d8b1",
+ *     lastUsed: new Date(),
+ *     verified: false,
+ * };
+ * ```
  */
 export interface ISession extends ISessionSQL {}
 
@@ -204,6 +219,15 @@ export type { IServer } from "@vex-chat/types";
  * - `fileID`: file identifier
  * - `owner`: owner device/user ID
  * - `nonce`: file encryption nonce (hex)
+ *
+ * @example
+ * ```ts
+ * const file: IFile = {
+ *     fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
+ *     owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
+ *     nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
+ * };
+ * ```
  */
 export interface IFile extends IFileSQL {}
 
@@ -213,6 +237,18 @@ export interface IFile extends IFileSQL {}
  * Structure:
  * - `details`: metadata (`IFile`)
  * - `data`: decrypted binary bytes
+ *
+ * @example
+ * ```ts
+ * const response: IFileRes = {
+ *     details: {
+ *         fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
+ *         owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
+ *         nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
+ *     },
+ *     data: Buffer.from("hello"),
+ * };
+ * ```
  */
 export interface IFileRes extends IFileResponse {}
 
