@@ -3,7 +3,6 @@ export type {
     IChannels,
     IChannel,
     IClientOptions,
-    ICensoredUser,
     IDevices,
     IEmojis,
     IDevice,
