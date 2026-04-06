@@ -1,9 +1,7 @@
 import { XUtils } from "@vex-chat/crypto";
 import type { ISessionCrypto, ISessionSQL } from "@vex-chat/types";
 
-export function sqlSessionToCrypto(
-    session: ISessionSQL
-): ISessionCrypto {
+export function sqlSessionToCrypto(session: ISessionSQL): ISessionCrypto {
     return {
         sessionID: session.sessionID,
         userID: session.userID,

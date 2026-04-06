@@ -3,7 +3,13 @@ import { sleep } from "@extrahash/sleep";
 import fs from "fs";
 import _ from "lodash";
 import { Client } from "../index.js";
-import type { IChannel, IClientOptions, IMessage, IServer, IUser } from "../index.js";
+import type {
+    IChannel,
+    IClientOptions,
+    IMessage,
+    IServer,
+    IUser,
+} from "../index.js";
 
 let clientA: Client | null = null;
 
@@ -99,7 +105,7 @@ describe("Perform client tests", () => {
         expect(server.serverID).toBe(knownServer.serverID);
 
         const retrieveByIDServer = await clientA!.servers.retrieveByID(
-            server.serverID
+            server.serverID,
         );
         expect(server.serverID).toEqual(retrieveByIDServer?.serverID);
 
@@ -115,7 +121,7 @@ describe("Perform client tests", () => {
 
         const channel = await clientA!.channels.create(
             "Test Channel",
-            testServer.serverID
+            testServer.serverID,
         );
 
         await clientA!.channels.delete(channel.channelID);
@@ -126,10 +132,10 @@ describe("Perform client tests", () => {
         createdChannel = channels[0];
 
         const retrievedByIDChannel = await clientA!.channels.retrieveByID(
-            channels[0].channelID
+            channels[0].channelID,
         );
         expect(channels[0].channelID === retrievedByIDChannel?.channelID).toBe(
-            true
+            true,
         );
     });
 
@@ -173,7 +179,7 @@ describe("Perform client tests", () => {
         const [createdDetails, key] = await clientA!.files.create(createdFile);
         const fetchedFileRes = await clientA!.files.retrieve(
             createdDetails.fileID,
-            key
+            key,
         );
         if (!fetchedFileRes) {
             throw new Error("Error fetching file.");
@@ -190,7 +196,7 @@ describe("Perform client tests", () => {
         const emoji = await clientA!.emoji.create(
             buf,
             "triggered",
-            createdServer!.serverID
+            createdServer!.serverID,
         );
         if (!emoji) {
             throw new Error("Couldn't create emoji.");
@@ -211,12 +217,12 @@ describe("Perform client tests", () => {
 
         const invite = await clientA!.invites.create(
             createdServer.serverID,
-            "1h"
+            "1h",
         );
         await clientA?.invites.redeem(invite.inviteID);
 
         const serverInviteList = await clientA?.invites.retrieve(
-            createdServer.serverID
+            createdServer.serverID,
         );
     });
 
@@ -248,13 +254,16 @@ describe("Perform client tests", () => {
 
             await clientA!.messages.group(createdChannel!.channelID, "initial");
             await sleep(500);
-            await clientA!.messages.group(createdChannel!.channelID, "subsequent");
+            await clientA!.messages.group(
+                createdChannel!.channelID,
+                "subsequent",
+            );
         });
     });
 
     test("Message history operations", async () => {
         const history = await clientA?.messages.retrieve(
-            clientA.me.user().userID
+            clientA.me.user().userID,
         );
         if (!history) {
             throw new Error("No history found!");
@@ -263,7 +272,7 @@ describe("Perform client tests", () => {
         await clientA?.messages.delete(clientA.me.user().userID);
 
         const postHistory = await clientA?.messages.retrieve(
-            clientA.me.user().userID
+            clientA.me.user().userID,
         );
         expect(postHistory?.length).toBe(0);
     });

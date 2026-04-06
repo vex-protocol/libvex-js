@@ -1,6 +1,12 @@
 import { sleep } from "@extrahash/sleep";
 import { XKeyConvert, XUtils } from "@vex-chat/crypto";
-import type { IDevice, IPreKeysCrypto, IPreKeysSQL, ISessionCrypto, ISessionSQL } from "@vex-chat/types";
+import type {
+    IDevice,
+    IPreKeysCrypto,
+    IPreKeysSQL,
+    ISessionCrypto,
+    ISessionSQL,
+} from "@vex-chat/types";
 import { EventEmitter } from "events";
 import knex, { type Knex } from "knex";
 import parseDuration from "parse-duration";
@@ -30,7 +36,7 @@ export class Storage extends EventEmitter implements IStorage {
         this.log = createLogger("db", options?.dbLogLevel || options?.logLevel);
 
         const idKeys = XKeyConvert.convertKeyPair(
-            nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(SK))
+            nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(SK)),
         );
         if (!idKeys) {
             throw new Error("Can't convert SK!");
@@ -65,7 +71,7 @@ export class Storage extends EventEmitter implements IStorage {
 
         if (this.closing) {
             this.log.warn(
-                "Database is closing, saveMessage() will not complete."
+                "Database is closing, saveMessage() will not complete.",
             );
             return;
         }
@@ -77,8 +83,8 @@ export class Storage extends EventEmitter implements IStorage {
             nacl.secretbox(
                 XUtils.decodeUTF8(message.message),
                 XUtils.decodeHex(message.nonce),
-                this.idKeys.secretKey
-            )
+                this.idKeys.secretKey,
+            ),
         );
 
         try {
@@ -88,7 +94,7 @@ export class Storage extends EventEmitter implements IStorage {
                 throw err;
             }
             this.log.warn(
-                "Attempted to insert duplicate nonce into message table."
+                "Attempted to insert duplicate nonce into message table.",
             );
         }
     }
@@ -96,20 +102,17 @@ export class Storage extends EventEmitter implements IStorage {
     public async deleteMessage(mailID: string) {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, saveMessage() will not complete."
+                "Database is closing, saveMessage() will not complete.",
             );
             return;
         }
-        await this.db
-            .from("messages")
-            .where({ mailID })
-            .del();
+        await this.db.from("messages").where({ mailID }).del();
     }
 
     public async markSessionVerified(sessionID: string, status = true) {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, markSessionVerified() will not complete."
+                "Database is closing, markSessionVerified() will not complete.",
             );
             return;
         }
@@ -121,7 +124,7 @@ export class Storage extends EventEmitter implements IStorage {
     public async getMessageHistory(userID: string): Promise<IMessage[]> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getMessageHistory() will not complete."
+                "Database is closing, getMessageHistory() will not complete.",
             );
             return [];
         }
@@ -141,7 +144,7 @@ export class Storage extends EventEmitter implements IStorage {
                 const localDecrypt = nacl.secretbox.open(
                     XUtils.decodeHex(message.message),
                     XUtils.decodeHex(message.nonce),
-                    this.idKeys!.secretKey
+                    this.idKeys!.secretKey,
                 );
                 if (localDecrypt) {
                     message.message = XUtils.encodeUTF8(localDecrypt);
@@ -152,7 +155,7 @@ export class Storage extends EventEmitter implements IStorage {
             return message;
         });
         this.log.debug(
-            "getMessageHistory() => " + JSON.stringify(fixedMessages, null, 4)
+            "getMessageHistory() => " + JSON.stringify(fixedMessages, null, 4),
         );
         return fixedMessages;
     }
@@ -160,7 +163,7 @@ export class Storage extends EventEmitter implements IStorage {
     public async getGroupHistory(channelID: string): Promise<IMessage[]> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getGroupHistory() will not complete."
+                "Database is closing, getGroupHistory() will not complete.",
             );
             return [];
         }
@@ -179,7 +182,7 @@ export class Storage extends EventEmitter implements IStorage {
                 const localDecrypt = nacl.secretbox.open(
                     XUtils.decodeHex(message.message),
                     XUtils.decodeHex(message.nonce),
-                    this.idKeys!.secretKey
+                    this.idKeys!.secretKey,
                 );
                 if (localDecrypt) {
                     message.message = XUtils.encodeUTF8(localDecrypt);
@@ -190,28 +193,28 @@ export class Storage extends EventEmitter implements IStorage {
             return message;
         });
         this.log.debug(
-            "getGroupHistory() => " + JSON.stringify(fixedMessages, null, 4)
+            "getGroupHistory() => " + JSON.stringify(fixedMessages, null, 4),
         );
         return fixedMessages;
     }
 
     public async savePreKeys(
         preKeys: IPreKeysCrypto[],
-        oneTime: boolean
+        oneTime: boolean,
     ): Promise<IPreKeysSQL[]> {
         const addedIndexes: number[] = [];
 
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
-                "Database is closing, savePreKeys() will not complete."
+                "Database is closing, savePreKeys() will not complete.",
             );
             return [];
         }
 
         for (const preKey of preKeys) {
             const index = await this.db(
-                oneTime ? "oneTimeKeys" : "preKeys"
+                oneTime ? "oneTimeKeys" : "preKeys",
             ).insert({
                 privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
                 publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
@@ -231,18 +234,18 @@ export class Storage extends EventEmitter implements IStorage {
         });
 
         this.log.silly(
-            "savePreKeys() => " + JSON.stringify(addedKeys, null, 4)
+            "savePreKeys() => " + JSON.stringify(addedKeys, null, 4),
         );
 
         return addedKeys;
     }
 
     public async getSessionByPublicKey(
-        publicKey: Uint8Array
+        publicKey: Uint8Array,
     ): Promise<ISessionCrypto | null> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getGroupHistory() will not complete."
+                "Database is closing, getGroupHistory() will not complete.",
             );
             return null;
         }
@@ -256,7 +259,7 @@ export class Storage extends EventEmitter implements IStorage {
         if (rows.length === 0) {
             this.log.warn(
                 `getSessionByPublicKey(${XUtils.encodeHex(publicKey)}) => ` +
-                    JSON.stringify(null, null, 4)
+                    JSON.stringify(null, null, 4),
             );
             return null;
         }
@@ -265,7 +268,7 @@ export class Storage extends EventEmitter implements IStorage {
         const wsSession: ISessionCrypto = sqlSessionToCrypto(session);
 
         this.log.debug(
-            "getSessionByPublicKey() => " + JSON.stringify(wsSession, null, 4)
+            "getSessionByPublicKey() => " + JSON.stringify(wsSession, null, 4),
         );
         return wsSession;
     }
@@ -273,7 +276,7 @@ export class Storage extends EventEmitter implements IStorage {
     public async markSessionUsed(sessionID: string): Promise<void> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, markSessionUsed() will not complete."
+                "Database is closing, markSessionUsed() will not complete.",
             );
             return;
         }
@@ -286,7 +289,7 @@ export class Storage extends EventEmitter implements IStorage {
     public async getAllSessions(): Promise<ISessionSQL[]> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getAllSessions() will not complete."
+                "Database is closing, getAllSessions() will not complete.",
             );
             return [];
         }
@@ -300,17 +303,17 @@ export class Storage extends EventEmitter implements IStorage {
             return session;
         });
         this.log.debug(
-            "getAllSessions() => " + JSON.stringify(fixedRows, null, 4)
+            "getAllSessions() => " + JSON.stringify(fixedRows, null, 4),
         );
         return fixedRows;
     }
 
     public async getSessionByDeviceID(
-        deviceID: string
+        deviceID: string,
     ): Promise<ISessionCrypto | null> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getSessionByUserID() will not complete."
+                "Database is closing, getSessionByUserID() will not complete.",
             );
             return null;
         }
@@ -343,13 +346,11 @@ export class Storage extends EventEmitter implements IStorage {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getPreKeys() will not complete."
+                "Database is closing, getPreKeys() will not complete.",
             );
             return null;
         }
-        const rows: IPreKeysSQL[] = await this.db
-            .from("preKeys")
-            .select();
+        const rows: IPreKeysSQL[] = await this.db.from("preKeys").select();
         if (rows.length === 0) {
             this.log.debug("getPreKeys() => " + JSON.stringify(null, null, 4));
             return null;
@@ -357,7 +358,7 @@ export class Storage extends EventEmitter implements IStorage {
         const [preKeyInfo] = rows;
         const preKeys: IPreKeysCrypto = {
             keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(preKeyInfo.privateKey!)
+                XUtils.decodeHex(preKeyInfo.privateKey!),
             ),
             signature: XUtils.decodeHex(preKeyInfo.signature),
         };
@@ -365,13 +366,11 @@ export class Storage extends EventEmitter implements IStorage {
         return preKeys;
     }
 
-    public async getOneTimeKey(
-        index: number
-    ): Promise<IPreKeysCrypto | null> {
+    public async getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
-                "Database is closing, getOneTimeKey() will not complete."
+                "Database is closing, getOneTimeKey() will not complete.",
             );
             return null;
         }
@@ -381,7 +380,7 @@ export class Storage extends EventEmitter implements IStorage {
             .where({ index });
         if (rows.length === 0) {
             this.log.debug(
-                "getOneTimeKey() => " + JSON.stringify(null, null, 4)
+                "getOneTimeKey() => " + JSON.stringify(null, null, 4),
             );
             return null;
         }
@@ -389,7 +388,7 @@ export class Storage extends EventEmitter implements IStorage {
         const [otkInfo] = rows;
         const otk: IPreKeysCrypto = {
             keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(otkInfo.privateKey!)
+                XUtils.decodeHex(otkInfo.privateKey!),
             ),
             signature: XUtils.decodeHex(otkInfo.signature),
             index: otkInfo.index,
@@ -401,21 +400,18 @@ export class Storage extends EventEmitter implements IStorage {
     public async deleteOneTimeKey(index: number) {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, deleteOneTimeKey() will not complete."
+                "Database is closing, deleteOneTimeKey() will not complete.",
             );
             return;
         }
         // delete the otk
-        await this.db
-            .from("oneTimeKeys")
-            .delete()
-            .where({ index });
+        await this.db.from("oneTimeKeys").delete().where({ index });
     }
 
     public async saveSession(session: ISessionSQL) {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, deleteOneTimeKey() will not complete."
+                "Database is closing, deleteOneTimeKey() will not complete.",
             );
             return;
         }
@@ -432,10 +428,7 @@ export class Storage extends EventEmitter implements IStorage {
     }
 
     public async getDevice(deviceID: string) {
-        const rows = await this.db
-            .from("devices")
-            .select()
-            .where({ deviceID });
+        const rows = await this.db.from("devices").select().where({ deviceID });
         if (rows.length === 0) {
             return null;
         }
@@ -455,7 +448,7 @@ export class Storage extends EventEmitter implements IStorage {
 
     public async deleteHistory(
         channelOrUserID: string,
-        olderThan?: string
+        olderThan?: string,
     ): Promise<void> {
         if (!olderThan) {
             await this.db
@@ -468,7 +461,7 @@ export class Storage extends EventEmitter implements IStorage {
             const duration = parseDuration(olderThan);
             if (!duration) {
                 throw new Error(
-                    "Bad duration. See parse-duration library for more details."
+                    "Bad duration. See parse-duration library for more details.",
                 );
             }
             console.log(duration);
@@ -477,7 +470,7 @@ export class Storage extends EventEmitter implements IStorage {
                 .where(
                     "time",
                     "<",
-                    new Date(Date.now() - duration).toISOString()
+                    new Date(Date.now() - duration).toISOString(),
                 );
             console.log(res);
         }
@@ -486,7 +479,7 @@ export class Storage extends EventEmitter implements IStorage {
     public async saveDevice(device: IDevice) {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, saveDevice() will not complete."
+                "Database is closing, saveDevice() will not complete.",
             );
             return;
         }
@@ -506,67 +499,82 @@ export class Storage extends EventEmitter implements IStorage {
         this.log.info("Initializing database tables.");
         try {
             if (!(await this.db.schema.hasTable("messages"))) {
-                await this.db.schema.createTable("messages", (table: Knex.CreateTableBuilder) => {
-                    table.string("nonce").primary();
-                    table.string("sender").index();
-                    table.string("recipient").index();
-                    table.string("group").index();
-                    table.string("mailID");
-                    table.string("message");
-                    table.string("direction");
-                    table.date("timestamp");
-                    table.boolean("decrypted");
-                    table.boolean("forward");
-                    table.string("authorID");
-                    table.string("readerID");
-                });
+                await this.db.schema.createTable(
+                    "messages",
+                    (table: Knex.CreateTableBuilder) => {
+                        table.string("nonce").primary();
+                        table.string("sender").index();
+                        table.string("recipient").index();
+                        table.string("group").index();
+                        table.string("mailID");
+                        table.string("message");
+                        table.string("direction");
+                        table.date("timestamp");
+                        table.boolean("decrypted");
+                        table.boolean("forward");
+                        table.string("authorID");
+                        table.string("readerID");
+                    },
+                );
             }
 
             if (!(await this.db.schema.hasTable("devices"))) {
-                await this.db.schema.createTable("devices", (table: Knex.CreateTableBuilder) => {
-                    table.string("deviceID").primary();
-                    table.string("owner").index();
-                    table.string("signKey");
-                    table.string("name");
-                    table.string("lastLogin");
-                    table.boolean("deleted");
-                });
+                await this.db.schema.createTable(
+                    "devices",
+                    (table: Knex.CreateTableBuilder) => {
+                        table.string("deviceID").primary();
+                        table.string("owner").index();
+                        table.string("signKey");
+                        table.string("name");
+                        table.string("lastLogin");
+                        table.boolean("deleted");
+                    },
+                );
             }
 
             if (!(await this.db.schema.hasTable("sessions"))) {
-                await this.db.schema.createTable("sessions", (table: Knex.CreateTableBuilder) => {
-                    table.string("sessionID").primary();
-                    table.string("userID");
-                    table.string("deviceID");
-                    table.string("SK").unique();
-                    table.string("publicKey");
-                    table.string("fingerprint");
-                    table.string("mode");
-                    table.date("lastUsed");
-                    table.boolean("verified");
-                });
+                await this.db.schema.createTable(
+                    "sessions",
+                    (table: Knex.CreateTableBuilder) => {
+                        table.string("sessionID").primary();
+                        table.string("userID");
+                        table.string("deviceID");
+                        table.string("SK").unique();
+                        table.string("publicKey");
+                        table.string("fingerprint");
+                        table.string("mode");
+                        table.date("lastUsed");
+                        table.boolean("verified");
+                    },
+                );
             }
             if (!(await this.db.schema.hasTable("preKeys"))) {
-                await this.db.schema.createTable("preKeys", (table: Knex.CreateTableBuilder) => {
-                    table.increments("index");
-                    table.string("keyID").unique();
-                    table.string("userID");
-                    table.string("deviceID");
-                    table.string("privateKey");
-                    table.string("publicKey");
-                    table.string("signature");
-                });
+                await this.db.schema.createTable(
+                    "preKeys",
+                    (table: Knex.CreateTableBuilder) => {
+                        table.increments("index");
+                        table.string("keyID").unique();
+                        table.string("userID");
+                        table.string("deviceID");
+                        table.string("privateKey");
+                        table.string("publicKey");
+                        table.string("signature");
+                    },
+                );
             }
             if (!(await this.db.schema.hasTable("oneTimeKeys"))) {
-                await this.db.schema.createTable("oneTimeKeys", (table: Knex.CreateTableBuilder) => {
-                    table.increments("index");
-                    table.string("keyID").unique();
-                    table.string("userID");
-                    table.string("deviceID");
-                    table.string("privateKey");
-                    table.string("publicKey");
-                    table.string("signature");
-                });
+                await this.db.schema.createTable(
+                    "oneTimeKeys",
+                    (table: Knex.CreateTableBuilder) => {
+                        table.increments("index");
+                        table.string("keyID").unique();
+                        table.string("userID");
+                        table.string("deviceID");
+                        table.string("privateKey");
+                        table.string("publicKey");
+                        table.string("signature");
+                    },
+                );
             }
 
             this.ready = true;

@@ -22,7 +22,7 @@
     },
     "scripts": {
         "build": "rimraf dist && tsc",
-        "prettier": "prettier '**/*.{ts,tsx,json,md}' --trailing-comma es5 --tab-width 4 --ignore-path .gitignore --arrow-parens always --write",
+        "format": "prettier '**/*.{ts,tsx,json,md}' --tab-width 4 --ignore-path .gitignore --write",
         "prepack": "npm run build",
         "docs": "npx typedoc --options typedoc.json",
         "test": "vitest run"
