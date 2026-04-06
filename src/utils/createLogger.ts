@@ -13,7 +13,7 @@ export function createLogger(logName: string, logLevel?: string) {
             }),
             winston.format.errors({ stack: true }),
             winston.format.splat(),
-            winston.format.json()
+            winston.format.json(),
         ),
         defaultMeta: { service: "vex-" + logName },
         transports: [
@@ -36,9 +36,9 @@ export function createLogger(logName: string, logLevel?: string) {
             new winston.transports.Console({
                 format: winston.format.combine(
                     winston.format.colorize(),
-                    winston.format.simple()
+                    winston.format.simple(),
                 ),
-            })
+            }),
         );
     }
     return logger;

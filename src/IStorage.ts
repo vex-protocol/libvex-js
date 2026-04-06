@@ -1,146 +1,114 @@
-import type { IDevice, IPreKeysCrypto, IPreKeysSQL, ISessionCrypto } from "@vex-chat/types";
+import type {
+    IDevice,
+    IPreKeysCrypto,
+    IPreKeysSQL,
+    ISessionCrypto,
+} from "@vex-chat/types";
 import { EventEmitter } from "events";
 import type { IMessage, ISession } from "./index.js";
 /**
- * This is the class you must implement to store and retrieve
- * important data for the key exchange and messaging processes if you want to
- * replace the Database class, for example, if you wanted to port
- * this library to mobile or browser or another platform that doesn't support
- * knex.js
+ * Storage contract used by `Client` for local persistence.
+ *
+ * Implement this interface when you want to replace the built-in sqlite-backed
+ * `Storage` class (for example on mobile, web, or any custom environment).
+ *
+ * A custom implementation is responsible for:
+ * - Persisting encrypted/decrypted message history
+ * - Storing device records and cryptographic sessions
+ * - Managing prekeys / one-time keys used for session setup
+ * - Emitting lifecycle events (`ready`, `error`)
  */
 export interface IStorage extends EventEmitter {
     /**
      * Set this to "true" when init has complete.
      */
     ready: boolean;
-    /**
-     * Closes the database. You must close any open connections
-     * so the sqlite database is available to be opened again.
-     */
+    /** Closes storage resources (connections, handles, transactions, etc.). */
     close: () => Promise<void>;
     /**
-     * Saves a single message to a database.
+     * Persists one chat message.
      *
-     * @param message The message to save.
+     * @example
+     * ```ts
+     * await storage.saveMessage(message);
+     * ```
      */
     saveMessage: (message: IMessage) => Promise<void>;
-    /**
-     * Deletes a message. Remove it entirely.
-     *
-     * @param message The message to delete.
-     */
+    /** Deletes one message by `mailID`. */
     deleteMessage: (mailID: string) => Promise<void>;
     /**
-     * Marks a session as "verified" which means the
-     * user has compared the mnemonic fingerprint with
-     * the other user and indicated it matches.
+     * Marks an encryption session as verified.
      *
-     * @param sessionID the sessionID to mark verified.
+     * This usually means the user has compared safety words / fingerprint out
+     * of band and confirmed the session.
      */
     markSessionVerified: (sessionID: string) => Promise<void>;
-    /**
-     * Updates the "lastUsed" timestamp key of a session
-     * to the current time. This will be called each time the
-     * session is used to encrypt or decrypt a message.
-     *
-     * @param sessionID the sessionID to mark used.
-     */
+    /** Updates a session's `lastUsed` timestamp to "now". */
     markSessionUsed: (sessionID: string) => Promise<void>;
     /**
-     * Gets the direct message history of a user by their userID, in
-     * descending temporal order.
+     * Returns direct-message history for a user.
      *
-     * @param userID the userID to retrieve history for.
+     * @example
+     * ```ts
+     * const history = await storage.getMessageHistory(userID);
+     * ```
      */
     getMessageHistory: (userID: string) => Promise<IMessage[]>;
-    /**
-     * Gets the group message history of a channel by its channelID, in
-     * descending temporal order.
-     *
-     * @param channelID the channelID to retrieve history for.
-     */
+    /** Returns group-message history for a channel. */
     getGroupHistory: (channelID: string) => Promise<IMessage[]>;
     /**
-     * Deletes the history for a userID or channelID older than a
-     * specified duration, if duration is not included, all history
-     * is deleted.
+     * Deletes history for a direct conversation or group channel.
      *
-     * @param channelOrUserID the channelID to delete history for.
-     * @param duration the duration as a string eg. 1h or 7d or 30m
+     * If `olderThan` is omitted, the full history for that thread is removed.
+     *
+     * @param channelOrUserID Channel ID or user ID whose history should be deleted.
+     * @param olderThan Relative duration such as `1h`, `7d`, or `30m`.
      */
     deleteHistory: (
         channelOrUserID: string,
-        olderThan?: string
+        olderThan?: string,
     ) => Promise<void>;
-    /**
-     * Deletes all history.
-     */
+    /** Deletes all message history. */
     purgeHistory: () => Promise<void>;
-    /**
-     * Deletes all sessions, one time keys, and prekeys.
-     */
+    /** Deletes all local key/session state. */
     purgeKeyData: () => Promise<void>;
     /**
-     * Saves a main set of prekeys or a onetime set of prekeys,
-     * as indicated by the oneTime parameter.
+     * Saves signed prekeys.
+     *
+     * @param preKeys Prekeys to persist.
+     * @param oneTime `true` for one-time keys, `false` for the long-lived signed prekey.
      */
     savePreKeys: (
         preKeys: IPreKeysCrypto[],
-        oneTime: boolean
+        oneTime: boolean,
     ) => Promise<IPreKeysSQL[]>;
     /**
-     * Gets your set of main prekeys. You only have one at a time.
-     * Returns null if the prekeys have not been saved yet.
-     *
-     * @param preKeys the set of prekeys to save.
-     * @param oneTime whether or not the set of prekeys is a one time set.
+     * Returns the local signed prekey pair, or `null` when it has not been created yet.
      */
     getPreKeys: () => Promise<IPreKeysCrypto | null>;
-    /**
-     * Gets a set of one time keys by index number.
-     *
-     * @param index The index number of the prekey to fetch.
-     */
+    /** Fetches one one-time key by index. */
     getOneTimeKey: (index: number) => Promise<IPreKeysCrypto | null>;
-    /**
-     * Deletes a set of one time keys by index number.
-     *
-     * @param index The index number of the prekey to delete.
-     */
+    /** Deletes one one-time key by index. */
     deleteOneTimeKey: (index: number) => Promise<void>;
-    /**
-     * Gets an encryption session by its public key.
-     *
-     * @param publicKey the public key of the session to fetch.
-     */
+    /** Fetches an encryption session using the session public key bytes. */
     getSessionByPublicKey: (
-        publicKey: Uint8Array
+        publicKey: Uint8Array,
     ) => Promise<ISessionCrypto | null>;
-    /**
-     * Gets all encryption sessions.
-     */
+    /** Returns all known encryption sessions. */
     getAllSessions: () => Promise<ISession[]>;
-    /**
-     * Gets the most recently used (active) session (by lastUsed key) by userID.
-     *
-     * @param userID The userID to retrieve the active session for.
-     */
-    getSessionByDeviceID: (
-        deviceID: string
-    ) => Promise<ISessionCrypto | null>;
-    /**
-     * Saves an encryption session.
-     *
-     * @param session The ISession object to save.
-     */
+    /** Returns the active session for a device ID (typically the most recently used). */
+    getSessionByDeviceID: (deviceID: string) => Promise<ISessionCrypto | null>;
+    /** Persists an encryption session. */
     saveSession: (session: ISession) => Promise<void>;
     /**
-     * Any initializing you may need to do before the class is used.
-     * For example, you could initialize the database schema here.
+     * Performs storage initialization (schema creation, migrations, warmup, etc.).
+     *
+     * Implementations should set `ready = true` and emit `ready` after completion.
      */
-
     init: () => Promise<void>;
+    /** Gets one device record by ID. */
     getDevice: (deviceID: string) => Promise<IDevice | null>;
+    /** Saves a device record. */
     saveDevice: (device: IDevice) => Promise<void>;
 
     /**

@@ -30,9 +30,9 @@ npx changeset
 
 This prompts you to:
 
--   Select the package (`@vex-chat/libvex`)
--   Choose bump type (patch / minor / major)
--   Write a short summary of the change
+- Select the package (`@vex-chat/libvex`)
+- Choose bump type (patch / minor / major)
+- Write a short summary of the change
 
 It creates a file in `.changeset/` — commit it with your code.
 
@@ -81,8 +81,8 @@ npx changeset publish          # publishes as @latest
 
 ## GitHub Secrets Required
 
--   `NPM_TOKEN` — npm access token with publish permission for `@vex-chat` scope
--   `GITHUB_TOKEN` — provided automatically by GitHub Actions
+- `NPM_TOKEN` — npm access token with publish permission for `@vex-chat` scope
+- `GITHUB_TOKEN` — provided automatically by GitHub Actions
 
 ## Local Development
 

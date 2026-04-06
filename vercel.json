@@ -2,4 +2,4 @@
     "buildCommand": "npm run docs",
     "outputDirectory": "docs",
     "installCommand": "npm install"
-  }
+}
