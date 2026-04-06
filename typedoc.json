@@ -1,6 +1,6 @@
 {
     "out": "docs",
-    "json": "typedoc-api.json",
+    "json": "docs/api.json",
     "emit": "both",
     "tsconfig": "./tsconfig.json",
     "entryPoints": ["./src/index.ts"],
