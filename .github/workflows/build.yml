@@ -16,36 +16,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: ["24"]
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
-        with:
-          always-auth: true
-          node-version: ${{ matrix.node-version }}
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@vex-chat"
-
-      - name: Setup Cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            node_modules
-          key: ${{ runner.os }}-node${{ matrix.node-version }}-${{ hashFiles('yarn.lock') }}
+      - name: Install mise
+        uses: jdx/mise-action@v3.5.1
 
       - name: Install Dependencies
-        run: yarn --network-concurrency 1
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.CI_KEY }}
+        run: npm ci
 
       - name: Build
-        run: yarn build
-
-      - name: Run tests
-        run: yarn test
+        run: npm run build
 
       - name: Package
         run: npm pack
@@ -59,5 +41,5 @@ jobs:
       - name: Store Build Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.os }}-node${{ matrix.node-version }}-${{ steps.before_deploy.outputs.file_name }}
+          name: ${{ matrix.os }}-${{ steps.before_deploy.outputs.file_name }}
           path: ${{ steps.before_deploy.outputs.file_name }}
