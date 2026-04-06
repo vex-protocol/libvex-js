@@ -213,7 +213,7 @@ export type { IChannel } from "@vex-chat/types";
 export type { IServer } from "@vex-chat/types";
 
 /**
- * Ifile is an uploaded encrypted file.
+ * IFile is an uploaded encrypted file.
  *
  * Common fields:
  * - `fileID`: file identifier
