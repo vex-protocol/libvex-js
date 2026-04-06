@@ -1,5 +1,5 @@
-import {
-    Client,
+export { Client } from "./Client.js";
+export type {
     IChannel,
     IClientOptions,
     IDevice,
@@ -12,23 +12,5 @@ import {
     IServer,
     ISession,
     IUser,
-} from "./Client";
-
-import { IStorage } from "./IStorage";
-
-export {
-    Client,
-    IClientOptions,
-    IMessage,
-    IPermission,
-    IUser,
-    ISession,
-    IKeys,
-    IChannel,
-    IServer,
-    IStorage,
-    IFile,
-    IFileRes,
-    IFileProgress,
-    IDevice,
-};
+} from "./Client.js";
+export type { IStorage } from "./IStorage.js";

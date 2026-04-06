@@ -13,28 +13,33 @@ import {
     xMnemonic,
     XUtils,
 } from "@vex-chat/crypto";
-import { XTypes } from "@vex-chat/types";
+import type { IActionToken, IChallMsg, IChannel, IDevice, IDevicePayload, IEmoji, IFileResponse, IFileSQL, IInvite, IKeyBundle, IMailWS, INotifyMsg, IPermission, IPreKeysCrypto, IPreKeysSQL, IPreKeysWS, IReceiptMsg, IRegistrationPayload, IResourceMsg, IRespMsg, IServer, ISessionCrypto, ISessionSQL, ISucessMsg, IXKeyRing } from "@vex-chat/types";
+import { MailType } from "@vex-chat/types";
 import ax, { AxiosError } from "axios";
 import { isBrowser, isNode } from "browser-or-node";
 import btoa from "btoa";
 import chalk from "chalk";
 import { EventEmitter } from "events";
-import { first } from "lodash";
-import msgpack from "msgpack-lite";
+import { Packr } from "msgpackr";
+// useRecords:false emits standard msgpack (no nonstandard record extension).
+// moreTypes:false keeps the extension set to what every other decoder understands.
+// Packr.pack() returns Node Buffer, which axios sends correctly (plain Uint8Array
+// would have its pool buffer sent in full — see axios issue #4068).
+const msgpack = new Packr({ useRecords: false, moreTypes: false });
 import objectHash from "object-hash";
-import os from "os";
-import { performance } from "perf_hooks";
+import * as os from "node:os";
+import { performance } from "node:perf_hooks";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
 import winston from "winston";
 import WebSocket from "ws";
-import { IStorage } from "./IStorage";
-import { Storage } from "./Storage";
-import { capitalize } from "./utils/capitalize";
-import { createLogger } from "./utils/createLogger";
-import { formatBytes } from "./utils/formatBytes";
-import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto";
-import { uuidToUint8 } from "./utils/uint8uuid";
+import type { IStorage } from "./IStorage.js";
+import { Storage } from "./Storage.js";
+import { capitalize } from "./utils/capitalize.js";
+import { createLogger } from "./utils/createLogger.js";
+import { formatBytes } from "./utils/formatBytes.js";
+import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
+import { uuidToUint8 } from "./utils/uint8uuid.js";
 
 ax.defaults.withCredentials = true;
 ax.defaults.responseType = "arraybuffer";
@@ -70,7 +75,7 @@ export interface IMessage {
 /**
  * IPermission is a permission to a resource.
  */
-export interface IPermission extends XTypes.SQL.IPermission {}
+export type { IPermission } from "@vex-chat/types";
 
 /**
  * IKeys are a pair of ed25519 public and private keys,
@@ -81,7 +86,7 @@ export interface IKeys {
     private: string;
 }
 
-export interface IDevice extends XTypes.SQL.IDevice {}
+export type { IDevice } from "@vex-chat/types";
 
 /**
  * IUser is a single user on the vex platform.
@@ -91,34 +96,34 @@ export interface IUser extends ICensoredUser {}
 /**
  * ISession is an end to end encryption session with another peer.
  */
-export interface ISession extends XTypes.SQL.ISession {}
+export interface ISession extends ISessionSQL {}
 
 /**
  * IChannel is a chat channel on a server.
  */
-export interface IChannel extends XTypes.SQL.IChannel {}
+export type { IChannel } from "@vex-chat/types";
 
 /**
  * IServer is a single chat server.
  */
-export interface IServer extends XTypes.SQL.IServer {}
+export type { IServer } from "@vex-chat/types";
 
 /**
  * Ifile is an uploaded encrypted file.
  */
-export interface IFile extends XTypes.SQL.IFile {}
+export interface IFile extends IFileSQL {}
 
 /**
  * IFileRes is a server response to a file retrieval request.
  */
-export interface IFileRes extends XTypes.HTTP.IFileResponse {}
+export interface IFileRes extends IFileResponse {}
 
 /**
  * @ignore
  */
 interface IMe {
     user: () => ICensoredUser;
-    device: () => XTypes.SQL.IDevice;
+    device: () => IDevice;
     setAvatar: (avatar: Buffer) => Promise<void>;
 }
 
@@ -146,9 +151,9 @@ interface IMessages {
  * @ignore
  */
 interface IServers {
-    retrieve: () => Promise<XTypes.SQL.IServer[]>;
-    retrieveByID: (serverID: string) => Promise<XTypes.SQL.IServer | null>;
-    create: (name: string) => Promise<XTypes.SQL.IServer>;
+    retrieve: () => Promise<IServer[]>;
+    retrieveByID: (serverID: string) => Promise<IServer | null>;
+    create: (name: string) => Promise<IServer>;
     delete: (serverID: string) => Promise<void>;
     leave: (serverID: string) => Promise<void>;
 }
@@ -160,14 +165,14 @@ interface IModeration {
     kick: (userID: string, serverID: string) => Promise<void>;
     fetchPermissionList: (
         serverID: string
-    ) => Promise<XTypes.SQL.IPermission[]>;
+    ) => Promise<IPermission[]>;
 }
 
 /**
  * @ignore
  */
 interface IPermissions {
-    retrieve: () => Promise<XTypes.SQL.IPermission[]>;
+    retrieve: () => Promise<IPermission[]>;
     delete: (permissionID: string) => Promise<void>;
 }
 
@@ -175,18 +180,18 @@ interface IPermissions {
  * @ignore
  */
 interface IInvites {
-    redeem: (inviteID: string) => Promise<XTypes.SQL.IPermission>;
-    create: (serverID: string, duration: string) => Promise<XTypes.SQL.IInvite>;
-    retrieve: (serverID: string) => Promise<XTypes.SQL.IInvite[]>;
+    redeem: (inviteID: string) => Promise<IPermission>;
+    create: (serverID: string, duration: string) => Promise<IInvite>;
+    retrieve: (serverID: string) => Promise<IInvite[]>;
 }
 
 /**
  * @ignore
  */
 interface IChannels {
-    retrieve: (serverID: string) => Promise<XTypes.SQL.IChannel[]>;
-    retrieveByID: (channelID: string) => Promise<XTypes.SQL.IChannel | null>;
-    create: (name: string, serverID: string) => Promise<XTypes.SQL.IChannel>;
+    retrieve: (serverID: string) => Promise<IChannel[]>;
+    retrieveByID: (channelID: string) => Promise<IChannel | null>;
+    create: (name: string, serverID: string) => Promise<IChannel>;
     delete: (channelID: string) => Promise<void>;
     userList: (channelID: string) => Promise<IUser[]>;
 }
@@ -195,8 +200,8 @@ interface IChannels {
  * @ignore
  */
 interface ISessions {
-    retrieve: () => Promise<XTypes.SQL.ISession[]>;
-    verify: (session: XTypes.SQL.ISession) => string;
+    retrieve: () => Promise<ISessionSQL[]>;
+    verify: (session: ISessionSQL) => string;
     markVerified: (fingerprint: string) => Promise<void>;
 }
 
@@ -204,8 +209,8 @@ interface ISessions {
  * @ignore
  */
 interface IDevices {
-    retrieve: (deviceIdentifier: string) => Promise<XTypes.SQL.IDevice | null>;
-    register: () => Promise<XTypes.SQL.IDevice | null>;
+    retrieve: (deviceIdentifier: string) => Promise<IDevice | null>;
+    register: () => Promise<IDevice | null>;
     delete: (deviceID: string) => Promise<void>;
 }
 
@@ -213,24 +218,24 @@ interface IDevices {
  * @ignore
  */
 interface IFiles {
-    create: (file: Buffer) => Promise<[XTypes.SQL.IFile, string]>;
+    create: (file: Buffer) => Promise<[IFileSQL, string]>;
     retrieve: (
         fileID: string,
         key: string
-    ) => Promise<XTypes.HTTP.IFileResponse | null>;
+    ) => Promise<IFileResponse | null>;
 }
 
 /**
  * @ignore
  */
-interface IEmoji {
+interface IEmojis {
     create: (
         emoji: Buffer,
         name: string,
         serverID: string
-    ) => Promise<XTypes.SQL.IEmoji | null>;
-    retrieveList: (serverID: string) => Promise<XTypes.SQL.IEmoji[]>;
-    retrieve: (emojiID: string) => Promise<XTypes.SQL.IEmoji | null>;
+    ) => Promise<IEmoji | null>;
+    retrieveList: (serverID: string) => Promise<IEmoji[]>;
+    retrieve: (emojiID: string) => Promise<IEmoji | null>;
 }
 
 export interface IFileProgress {
@@ -498,15 +503,15 @@ export class Client extends EventEmitter {
         );
     }
 
-    private static getMnemonic(session: XTypes.SQL.ISession): string {
+    private static getMnemonic(session: ISessionSQL): string {
         return xMnemonic(xKDF(XUtils.decodeHex(session.fingerprint)));
     }
     private static deserializeExtra(
-        type: XTypes.WS.MailType,
+        type: MailType,
         extra: Uint8Array
     ): Uint8Array[] {
         switch (type) {
-            case XTypes.WS.MailType.initial:
+            case MailType.initial:
                 /* 32 bytes for signkey, 32 bytes for ephemeral key, 
                  68 bytes for AD, 6 bytes for otk index (empty for no otk) */
                 const signKey = extra.slice(0, 32);
@@ -514,7 +519,7 @@ export class Client extends EventEmitter {
                 const ad = extra.slice(96, 164);
                 const index = extra.slice(164, 170);
                 return [signKey, ephKey, ad, index];
-            case XTypes.WS.MailType.subsequent:
+            case MailType.subsequent:
                 const publicKey = extra;
                 return [publicKey];
             default:
@@ -541,7 +546,7 @@ export class Client extends EventEmitter {
         familiars: this.getFamiliars.bind(this),
     };
 
-    public emoji: IEmoji = {
+    public emoji: IEmojis = {
         create: this.uploadEmoji.bind(this),
         retrieveList: this.retrieveEmojiList.bind(this),
         retrieve: this.retrieveEmojiByID.bind(this),
@@ -757,14 +762,14 @@ export class Client extends EventEmitter {
     private signKeys: nacl.SignKeyPair;
     private idKeys: nacl.BoxKeyPair | null;
 
-    private xKeyRing?: XTypes.CRYPTO.IXKeyRing;
+    private xKeyRing?: IXKeyRing;
 
     private user?: ICensoredUser;
-    private device?: XTypes.SQL.IDevice;
+    private device?: IDevice;
 
     private userRecords: Record<string, IUser> = {};
     private deviceRecords: Record<string, IDevice> = {};
-    private sessionRecords: Record<string, XTypes.CRYPTO.ISession> = {};
+    private sessionRecords: Record<string, ISessionCrypto> = {};
 
     private isAlive: boolean = true;
     private reading: boolean = false;
@@ -1027,7 +1032,7 @@ export class Client extends EventEmitter {
                     this.signKeys.secretKey
                 )
             );
-            const regMsg: XTypes.HTTP.IRegistrationPayload = {
+            const regMsg: IRegistrationPayload = {
                 username,
                 signKey,
                 signed,
@@ -1067,14 +1072,14 @@ export class Client extends EventEmitter {
 
     private async redeemInvite(
         inviteID: string
-    ): Promise<XTypes.SQL.IPermission> {
+    ): Promise<IPermission> {
         const res = await ax.patch(this.getHost() + "/invite/" + inviteID);
         return msgpack.decode(Buffer.from(res.data));
     }
 
     private async retrieveInvites(
         serverID: string
-    ): Promise<XTypes.SQL.IInvite[]> {
+    ): Promise<IInvite[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/invites"
         );
@@ -1097,7 +1102,7 @@ export class Client extends EventEmitter {
 
     private async retrieveEmojiList(
         serverID: string
-    ): Promise<XTypes.SQL.IEmoji[]> {
+    ): Promise<IEmoji[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/emoji"
         );
@@ -1106,7 +1111,7 @@ export class Client extends EventEmitter {
 
     private async retrieveEmojiByID(
         emojiID: string
-    ): Promise<XTypes.SQL.IEmoji | null> {
+    ): Promise<IEmoji | null> {
         const res = await ax.get(
             this.getHost() + "/emoji/" + emojiID + "/details"
         );
@@ -1155,10 +1160,10 @@ export class Client extends EventEmitter {
         emoji: Buffer,
         name: string,
         serverID: string
-    ): Promise<XTypes.SQL.IEmoji | null> {
+    ): Promise<IEmoji | null> {
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
-            fpayload.set("emoji", new Blob([emoji]));
+            fpayload.set("emoji", new Blob([new Uint8Array(emoji)]));
             fpayload.set("name", name);
 
             try {
@@ -1170,9 +1175,9 @@ export class Client extends EventEmitter {
                         onUploadProgress: (progressEvent) => {
                             const percentCompleted = Math.round(
                                 (progressEvent.loaded * 100) /
-                                    progressEvent.total
+                                    (progressEvent.total ?? 1)
                             );
-                            const { loaded, total } = progressEvent;
+                            const { loaded, total = 0 } = progressEvent;
                             const progress: IFileProgress = {
                                 direction: "upload",
                                 token: name,
@@ -1206,8 +1211,8 @@ export class Client extends EventEmitter {
         }
     }
 
-    private async retrieveOrCreateDevice(): Promise<XTypes.SQL.IDevice> {
-        let device: XTypes.SQL.IDevice;
+    private async retrieveOrCreateDevice(): Promise<IDevice> {
+        let device: IDevice;
         try {
             const res = await ax.get(
                 this.prefixes.HTTP +
@@ -1239,7 +1244,7 @@ export class Client extends EventEmitter {
         return device;
     }
 
-    private async registerDevice(): Promise<XTypes.SQL.IDevice | null> {
+    private async registerDevice(): Promise<IDevice | null> {
         while (!this.xKeyRing) {
             await sleep(100);
         }
@@ -1267,7 +1272,7 @@ export class Client extends EventEmitter {
             )
         );
 
-        const devMsg: XTypes.HTTP.IDevicePayload = {
+        const devMsg: IDevicePayload = {
             username: userDetails.username,
             signKey,
             signed,
@@ -1302,7 +1307,7 @@ export class Client extends EventEmitter {
             | "invite"
             | "emoji"
             | "connect"
-    ): Promise<XTypes.HTTP.IActionToken | null> {
+    ): Promise<IActionToken | null> {
         try {
             const res = await ax.get(this.getHost() + "/token/" + type, {
                 responseType: "arraybuffer",
@@ -1317,7 +1322,7 @@ export class Client extends EventEmitter {
     private async uploadAvatar(avatar: Buffer): Promise<void> {
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
-            fpayload.set("avatar", new Blob([avatar]));
+            fpayload.set("avatar", new Blob([new Uint8Array(avatar)]));
 
             await ax.post(
                 this.prefixes.HTTP +
@@ -1329,9 +1334,9 @@ export class Client extends EventEmitter {
                     headers: { "Content-Type": "multipart/form-data" },
                     onUploadProgress: (progressEvent) => {
                         const percentCompleted = Math.round(
-                            (progressEvent.loaded * 100) / progressEvent.total
+                            (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
                         );
-                        const { loaded, total } = progressEvent;
+                        const { loaded, total = 0 } = progressEvent;
                         const progress: IFileProgress = {
                             direction: "upload",
                             token: this.getUser().userID,
@@ -1367,7 +1372,7 @@ export class Client extends EventEmitter {
      */
     private async fetchPermissionList(
         serverID: string
-    ): Promise<XTypes.SQL.IPermission[]> {
+    ): Promise<IPermission[]> {
         const res = await ax.get(
             this.prefixes.HTTP +
                 this.host +
@@ -1383,7 +1388,7 @@ export class Client extends EventEmitter {
      *
      * @returns - The list of IPermissions objects.
      */
-    private async getPermissions(): Promise<XTypes.SQL.IPermission[]> {
+    private async getPermissions(): Promise<IPermission[]> {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/permissions"
         );
@@ -1397,7 +1402,7 @@ export class Client extends EventEmitter {
     private async retrieveFile(
         fileID: string,
         key: string
-    ): Promise<XTypes.HTTP.IFileResponse | null> {
+    ): Promise<IFileResponse | null> {
         try {
             const detailsRes = await ax.get(
                 this.getHost() + "/file/" + fileID + "/details"
@@ -1407,9 +1412,9 @@ export class Client extends EventEmitter {
             const res = await ax.get(this.getHost() + "/file/" + fileID, {
                 onDownloadProgress: (progressEvent) => {
                     const percentCompleted = Math.round(
-                        (progressEvent.loaded * 100) / progressEvent.total
+                        (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
                     );
-                    const { loaded, total } = progressEvent;
+                    const { loaded, total = 0 } = progressEvent;
                     const progress: IFileProgress = {
                         direction: "download",
                         token: fileID,
@@ -1429,7 +1434,7 @@ export class Client extends EventEmitter {
             );
 
             if (decrypted) {
-                const resp: XTypes.HTTP.IFileResponse = {
+                const resp: IFileResponse = {
                     details,
                     data: Buffer.from(decrypted),
                 };
@@ -1478,7 +1483,7 @@ export class Client extends EventEmitter {
     // returns the file details and the encryption key
     private async createFile(
         file: Buffer
-    ): Promise<[XTypes.SQL.IFile, string]> {
+    ): Promise<[IFileSQL, string]> {
         this.log.info(
             "Creating file, size: " + formatBytes(Buffer.byteLength(file))
         );
@@ -1493,15 +1498,15 @@ export class Client extends EventEmitter {
             const fpayload = new FormData();
             fpayload.set("owner", this.getDevice().deviceID);
             fpayload.set("nonce", XUtils.encodeHex(nonce));
-            fpayload.set("file", new Blob([box]));
+            fpayload.set("file", new Blob([new Uint8Array(box)]));
 
             const fres = await ax.post(this.getHost() + "/file", fpayload, {
                 headers: { "Content-Type": "multipart/form-data" },
                 onUploadProgress: (progressEvent) => {
                     const percentCompleted = Math.round(
-                        (progressEvent.loaded * 100) / progressEvent.total
+                        (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
                     );
-                    const { loaded, total } = progressEvent;
+                    const { loaded, total = 0 } = progressEvent;
                     const progress: IFileProgress = {
                         direction: "upload",
                         token: XUtils.encodeHex(nonce),
@@ -1512,7 +1517,7 @@ export class Client extends EventEmitter {
                     this.emit("fileProgress", progress);
                 },
             });
-            const fcreatedFile: XTypes.SQL.IFile = msgpack.decode(
+            const fcreatedFile: IFileSQL = msgpack.decode(
                 Buffer.from(fres.data)
             );
 
@@ -1533,7 +1538,7 @@ export class Client extends EventEmitter {
             msgpack.encode(payload),
             { headers: { "Content-Type": "application/msgpack" } }
         );
-        const createdFile: XTypes.SQL.IFile = msgpack.decode(
+        const createdFile: IFileSQL = msgpack.decode(
             Buffer.from(res.data)
         );
 
@@ -1678,7 +1683,7 @@ export class Client extends EventEmitter {
         });
     }
 
-    private async createServer(name: string): Promise<XTypes.SQL.IServer> {
+    private async createServer(name: string): Promise<IServer> {
         const res = await ax.post(this.getHost() + "/server/" + btoa(name));
         return msgpack.decode(Buffer.from(res.data));
     }
@@ -1774,8 +1779,8 @@ export class Client extends EventEmitter {
         const cipher = nacl.secretbox(msg, nonce, session.SK);
         const extra = session.publicKey;
 
-        const mail: XTypes.WS.IMail = {
-            mailType: XTypes.WS.MailType.subsequent,
+        const mail: IMailWS = {
+            mailType: MailType.subsequent,
             mailID: mailID || uuid.v4(),
             recipient: device.deviceID,
             cipher,
@@ -1788,7 +1793,7 @@ export class Client extends EventEmitter {
             readerID: session.userID,
         };
 
-        const msgb: XTypes.WS.IResourceMsg = {
+        const msgb: IResourceMsg = {
             transmissionID: uuid.v4(),
             type: "resource",
             resourceType: "mail",
@@ -1824,7 +1829,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as XTypes.WS.ISucessMsg).data);
+                        res((receivedMsg as ISucessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
@@ -1843,7 +1848,7 @@ export class Client extends EventEmitter {
         return this.database.getAllSessions();
     }
 
-    private async getServerList(): Promise<XTypes.SQL.IServer[]> {
+    private async getServerList(): Promise<IServer[]> {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/servers"
         );
@@ -1853,7 +1858,7 @@ export class Client extends EventEmitter {
     private async createChannel(
         name: string,
         serverID: string
-    ): Promise<XTypes.SQL.IChannel> {
+    ): Promise<IChannel> {
         const body = { name };
         const res = await ax.post(
             this.getHost() + "/server/" + serverID + "/channels",
@@ -1865,7 +1870,7 @@ export class Client extends EventEmitter {
 
     private async getDeviceByID(
         deviceID: string
-    ): Promise<XTypes.SQL.IDevice | null> {
+    ): Promise<IDevice | null> {
         if (this.deviceRecords[deviceID]) {
             this.log.info("Found device in local cache.");
             return this.deviceRecords[deviceID];
@@ -1905,14 +1910,14 @@ export class Client extends EventEmitter {
 
     private async getMultiUserDeviceList(
         userIDs: string[]
-    ): Promise<XTypes.SQL.IDevice[]> {
+    ): Promise<IDevice[]> {
         try {
             const res = await ax.post(
                 this.getHost() + "/deviceList",
                 msgpack.encode(userIDs),
                 { headers: { "Content-Type": "application/msgpack" } }
             );
-            const devices: XTypes.SQL.IDevice[] = msgpack.decode(
+            const devices: IDevice[] = msgpack.decode(
                 Buffer.from(res.data)
             );
             for (const device of devices) {
@@ -1927,12 +1932,12 @@ export class Client extends EventEmitter {
 
     private async getUserDeviceList(
         userID: string
-    ): Promise<XTypes.SQL.IDevice[] | null> {
+    ): Promise<IDevice[] | null> {
         try {
             const res = await ax.get(
                 this.getHost() + "/user/" + userID + "/devices"
             );
-            const devices: XTypes.SQL.IDevice[] = msgpack.decode(
+            const devices: IDevice[] = msgpack.decode(
                 Buffer.from(res.data)
             );
             for (const device of devices) {
@@ -1947,7 +1952,7 @@ export class Client extends EventEmitter {
 
     private async getServerByID(
         serverID: string
-    ): Promise<XTypes.SQL.IServer | null> {
+    ): Promise<IServer | null> {
         try {
             const res = await ax.get(this.getHost() + "/server/" + serverID);
             return msgpack.decode(Buffer.from(res.data));
@@ -1958,7 +1963,7 @@ export class Client extends EventEmitter {
 
     private async getChannelByID(
         channelID: string
-    ): Promise<XTypes.SQL.IChannel | null> {
+    ): Promise<IChannel | null> {
         try {
             const res = await ax.get(this.getHost() + "/channel/" + channelID);
             return msgpack.decode(Buffer.from(res.data));
@@ -1969,7 +1974,7 @@ export class Client extends EventEmitter {
 
     private async getChannelList(
         serverID: string
-    ): Promise<XTypes.SQL.IChannel[]> {
+    ): Promise<IChannel[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/channels"
         );
@@ -1987,7 +1992,7 @@ export class Client extends EventEmitter {
         return this.user;
     }
 
-    private getDevice(): XTypes.SQL.IDevice {
+    private getDevice(): IDevice {
         if (!this.device) {
             throw new Error(
                 "You must wait until the auth event is emitted before fetching device details."
@@ -2047,7 +2052,7 @@ export class Client extends EventEmitter {
         mailID: string | null,
         forward: boolean
     ): Promise<void> {
-        let keyBundle: XTypes.WS.IKeyBundle;
+        let keyBundle: IKeyBundle;
 
         this.log.info(
             "Requesting key bundle for device: " +
@@ -2125,8 +2130,8 @@ export class Client extends EventEmitter {
             IDX
         );
 
-        const mail: XTypes.WS.IMail = {
-            mailType: XTypes.WS.MailType.initial,
+        const mail: IMailWS = {
+            mailType: MailType.initial,
             mailID: mailID || uuid.v4(),
             recipient: device.deviceID,
             cipher,
@@ -2143,7 +2148,7 @@ export class Client extends EventEmitter {
         this.log.info("Mail hash: " + objectHash(mail));
         this.log.info("Generated hmac: " + XUtils.encodeHex(hmac));
 
-        const msg: XTypes.WS.IResourceMsg = {
+        const msg: IResourceMsg = {
             transmissionID: uuid.v4(),
             type: "resource",
             resourceType: "mail",
@@ -2156,7 +2161,7 @@ export class Client extends EventEmitter {
 
         // save the encryption session
         this.log.info("Saving new session.");
-        const sessionEntry: XTypes.SQL.ISession = {
+        const sessionEntry: ISessionSQL = {
             verified: false,
             sessionID: uuid.v4(),
             userID: user.userID,
@@ -2198,7 +2203,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as XTypes.WS.ISucessMsg).data);
+                        res((receivedMsg as ISucessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
@@ -2215,7 +2220,7 @@ export class Client extends EventEmitter {
     }
 
     private sendReceipt(nonce: Uint8Array) {
-        const receipt: XTypes.WS.IReceiptMsg = {
+        const receipt: IReceiptMsg = {
             type: "receipt",
             transmissionID: uuid.v4(),
             nonce,
@@ -2237,7 +2242,7 @@ export class Client extends EventEmitter {
 
     private async readMail(
         header: Uint8Array,
-        mail: XTypes.WS.IMail,
+        mail: IMailWS,
         timestamp: string
     ) {
         this.sendReceipt(mail.nonce);
@@ -2248,6 +2253,7 @@ export class Client extends EventEmitter {
         }
         this.reading = true;
 
+        try {
         const healSession = async () => {
             this.log.info("Requesting retry of " + mail.mailID);
             const deviceEntry = await this.getDeviceByID(mail.sender);
@@ -2266,7 +2272,7 @@ export class Client extends EventEmitter {
 
         this.log.info("Received mail from " + mail.sender);
         switch (mail.mailType) {
-            case XTypes.WS.MailType.subsequent:
+            case MailType.subsequent:
                 const [publicKey] = Client.deserializeExtra(
                     mail.mailType,
                     mail.extra
@@ -2365,7 +2371,7 @@ export class Client extends EventEmitter {
                     this.emit("message", message);
                 }
                 break;
-            case XTypes.WS.MailType.initial:
+            case MailType.initial:
                 this.log.info("Initiating new session.");
                 const [
                     signKey,
@@ -2373,7 +2379,7 @@ export class Client extends EventEmitter {
                     assocData,
                     indexBytes,
                 ] = Client.deserializeExtra(
-                    XTypes.WS.MailType.initial,
+                    MailType.initial,
                     mail.extra
                 );
 
@@ -2526,7 +2532,7 @@ export class Client extends EventEmitter {
                     this.deviceRecords[deviceEntry.deviceID] = deviceEntry;
 
                     // save session
-                    const newSession: XTypes.SQL.ISession = {
+                    const newSession: ISessionSQL = {
                         verified: false,
                         sessionID: uuid.v4(),
                         userID: userEntry.userID,
@@ -2567,7 +2573,9 @@ export class Client extends EventEmitter {
                 this.log.warn("Unsupported MailType:", mail.mailType);
                 break;
         }
-        this.reading = false;
+        } finally {
+            this.reading = false;
+        }
     }
 
     private newEphemeralKeys() {
@@ -2576,7 +2584,7 @@ export class Client extends EventEmitter {
 
     private createPreKey() {
         const preKeyPair = nacl.box.keyPair();
-        const preKeys: XTypes.CRYPTO.IPreKeys = {
+        const preKeys: IPreKeysCrypto = {
             keyPair: preKeyPair,
             signature: nacl.sign(
                 xEncode(xConstants.CURVE, preKeyPair.publicKey),
@@ -2586,7 +2594,7 @@ export class Client extends EventEmitter {
         return preKeys;
     }
 
-    private async handleNotify(msg: XTypes.WS.INotifyMsg) {
+    private async handleNotify(msg: INotifyMsg) {
         switch (msg.event) {
             case "mail":
                 this.log.info("Server has informed us of new mail.");
@@ -2691,7 +2699,7 @@ export class Client extends EventEmitter {
                         break;
                     case "challenge":
                         this.log.info("Received challenge from server.");
-                        this.respond(msg as XTypes.WS.IChallMsg);
+                        this.respond(msg as IChallMsg);
                         break;
                     case "unauthorized":
                         throw new Error(
@@ -2710,7 +2718,7 @@ export class Client extends EventEmitter {
                         this.log.warn(JSON.stringify(msg));
                         break;
                     case "notify":
-                        this.handleNotify(msg as XTypes.WS.INotifyMsg);
+                        this.handleNotify(msg as INotifyMsg);
                         break;
                     default:
                         this.log.info("Unsupported message " + msg.type);
@@ -2772,14 +2780,12 @@ export class Client extends EventEmitter {
             );
             const inbox: Array<[
                 Uint8Array,
-                XTypes.WS.IMail,
+                IMailWS,
                 Date
-            ]> = msgpack
-                .decode(Buffer.from(res.data))
-                .sort(
+            ]> = msgpack.decode(Buffer.from(res.data)).sort(
                     (
-                        a: [Uint8Array, XTypes.WS.IMail, Date],
-                        b: [Uint8Array, XTypes.WS.IMail, Date]
+                        a: [Uint8Array, IMailWS, Date],
+                        b: [Uint8Array, IMailWS, Date]
                     ) => b[2].getTime() - a[2].getTime()
                 );
 
@@ -2822,7 +2828,7 @@ export class Client extends EventEmitter {
 
     private async retrieveKeyBundle(
         deviceID: string
-    ): Promise<XTypes.WS.IKeyBundle> {
+    ): Promise<IKeyBundle> {
         const res = await ax.post(
             this.getHost() + "/device/" + deviceID + "/keyBundle"
         );
@@ -2840,7 +2846,7 @@ export class Client extends EventEmitter {
     }
 
     private async submitOTK(amount: number) {
-        const otks: XTypes.CRYPTO.IPreKeys[] = [];
+        const otks: IPreKeysCrypto[] = [];
 
         const t0 = performance.now();
         for (let i = 0; i < amount; i++) {
@@ -2875,8 +2881,8 @@ export class Client extends EventEmitter {
         await this.submitOTK(needs);
     }
 
-    private respond(msg: XTypes.WS.IChallMsg) {
-        const response: XTypes.WS.IRespMsg = {
+    private respond(msg: IChallMsg) {
+        const response: IRespMsg = {
             transmissionID: msg.transmissionID,
             type: "response",
             signed: nacl.sign(msg.challenge, this.signKeys.secretKey),
@@ -2896,7 +2902,7 @@ export class Client extends EventEmitter {
         this.send({ transmissionID: uuid.v4(), type: "ping" });
     }
 
-    private censorPreKey(preKey: XTypes.SQL.IPreKeys): XTypes.WS.IPreKeys {
+    private censorPreKey(preKey: IPreKeysSQL): IPreKeysWS {
         if (!preKey.index) {
             throw new Error("Key index is required.");
         }

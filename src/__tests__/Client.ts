@@ -2,7 +2,8 @@ import { sleep } from "@extrahash/sleep";
 // tslint:disable-next-line: no-implicit-dependencies
 import fs from "fs";
 import _ from "lodash";
-import { Client, IChannel, IClientOptions, IMessage, IServer, IUser } from "..";
+import { Client } from "../index.js";
+import type { IChannel, IClientOptions, IMessage, IServer, IUser } from "../index.js";
 
 let clientA: Client | null = null;
 
@@ -66,29 +67,29 @@ describe("Perform client tests", () => {
     const password = "hunter2";
 
     let userDetails: IUser | null = null;
-    test("Register", async (done) => {
+    test("Register", async () => {
         const [user, err] = await clientA!.register(username, password);
         if (err) {
             throw err;
         }
         userDetails = user;
         expect(user!.username === username).toBe(true);
-        done();
     });
 
     test("Login", () => {
         return login(clientA!, username, password);
     });
 
-    test("Connect", async (done) => {
-        clientA!.on("connected", () => {
-            done();
+    test("Connect", async () => {
+        await new Promise<void>(async (resolve) => {
+            clientA!.on("connected", () => {
+                resolve();
+            });
+            await clientA!.connect();
         });
-
-        await clientA!.connect();
     });
 
-    test("Server operations", async (done) => {
+    test("Server operations", async () => {
         const permissions = await clientA!.permissions.retrieve();
         expect(permissions).toEqual([]);
 
@@ -106,10 +107,9 @@ describe("Perform client tests", () => {
 
         // make another server to be used by channel tests
         createdServer = await clientA!.servers.create("Channel Test Server");
-        done();
     });
 
-    test("Channel operations", async (done) => {
+    test("Channel operations", async () => {
         const servers = await clientA!.servers.retrieve();
         const [testServer] = servers;
 
@@ -131,41 +131,42 @@ describe("Perform client tests", () => {
         expect(channels[0].channelID === retrievedByIDChannel?.channelID).toBe(
             true
         );
-        done();
     });
 
-    test("Direct messaging", async (done) => {
-        const received: string[] = [];
+    test("Direct messaging", async () => {
+        await new Promise<void>(async (resolve) => {
+            const received: string[] = [];
 
-        const receivedAllExpected = () =>
-            received.includes("initial") && received.includes("subsequent");
+            const receivedAllExpected = () =>
+                received.includes("initial") && received.includes("subsequent");
 
-        const onMessage = (message: IMessage) => {
-            if (!message.decrypted) {
-                throw new Error("Message failed to decrypt.");
-            }
-            if (
-                message.direction === "incoming" &&
-                message.decrypted &&
-                message.group === null
-            ) {
-                received.push(message.message);
-                if (receivedAllExpected()) {
-                    clientA!.off("message", onMessage);
-                    done();
+            const onMessage = (message: IMessage) => {
+                if (!message.decrypted) {
+                    throw new Error("Message failed to decrypt.");
                 }
-            }
-        };
-        clientA!.on("message", onMessage);
+                if (
+                    message.direction === "incoming" &&
+                    message.decrypted &&
+                    message.group === null
+                ) {
+                    received.push(message.message);
+                    if (receivedAllExpected()) {
+                        clientA!.off("message", onMessage);
+                        resolve();
+                    }
+                }
+            };
+            clientA!.on("message", onMessage);
 
-        const me = clientA!.me.user();
+            const me = clientA!.me.user();
 
-        await clientA!.messages.send(me.userID, "initial");
-        await sleep(500);
-        await clientA!.messages.send(me.userID, "subsequent");
+            await clientA!.messages.send(me.userID, "initial");
+            await sleep(500);
+            await clientA!.messages.send(me.userID, "subsequent");
+        });
     });
 
-    test("File operations", async (done) => {
+    test("File operations", async () => {
         const createdFile = Buffer.alloc(1000);
         createdFile.fill(0);
 
@@ -182,11 +183,9 @@ describe("Perform client tests", () => {
 
         expect(_.isEqual(createdFile, data)).toBe(true);
         expect(_.isEqual(createdDetails.nonce, details.nonce)).toBe(true);
-
-        done();
     });
 
-    test("Upload an emoji", async (done) => {
+    test("Upload an emoji", async () => {
         const buf = fs.readFileSync("./src/__tests__/triggered.png");
         const emoji = await clientA!.emoji.create(
             buf,
@@ -198,16 +197,14 @@ describe("Perform client tests", () => {
         }
         const list = await clientA?.emoji.retrieveList(createdServer!.serverID);
         expect([emoji]).toEqual(list);
-        done();
     });
 
-    test("Upload an avatar", async (done) => {
+    test("Upload an avatar", async () => {
         const buf = fs.readFileSync("./src/__tests__/ghost.png");
         await clientA!.me.setAvatar(buf);
-        done();
     });
 
-    test("Create invite", async (done) => {
+    test("Create invite", async () => {
         if (!createdServer) {
             throw new Error("Server not created, can't do invite test.");
         }
@@ -221,39 +218,41 @@ describe("Perform client tests", () => {
         const serverInviteList = await clientA?.invites.retrieve(
             createdServer.serverID
         );
-        done();
     });
 
-    test("Group messaging", async (done) => {
-        const received: string[] = [];
+    test("Group messaging", async () => {
+        await new Promise<void>(async (resolve) => {
+            const received: string[] = [];
 
-        const receivedAllExpected = () =>
-            received.includes("initial") && received.includes("subsequent");
+            const receivedAllExpected = () =>
+                received.includes("initial") && received.includes("subsequent");
 
-        const onGroupMessage = (message: IMessage) => {
-            if (!message.decrypted) {
-                throw new Error("Message failed to decrypt.");
-            }
-            if (
-                message.direction === "incoming" &&
-                message.decrypted &&
-                message.group !== null
-            ) {
-                received.push(message.message);
-                if (receivedAllExpected()) {
-                    done();
+            const onGroupMessage = (message: IMessage) => {
+                if (!message.decrypted) {
+                    throw new Error("Message failed to decrypt.");
                 }
-            }
-        };
+                if (
+                    message.direction === "incoming" &&
+                    message.decrypted &&
+                    message.group !== null
+                ) {
+                    received.push(message.message);
+                    if (receivedAllExpected()) {
+                        clientA!.off("message", onGroupMessage);
+                        resolve();
+                    }
+                }
+            };
 
-        clientA!.on("message", onGroupMessage);
+            clientA!.on("message", onGroupMessage);
 
-        await clientA!.messages.group(createdChannel!.channelID, "initial");
-        await sleep(500);
-        await clientA!.messages.group(createdChannel!.channelID, "subsequent");
+            await clientA!.messages.group(createdChannel!.channelID, "initial");
+            await sleep(500);
+            await clientA!.messages.group(createdChannel!.channelID, "subsequent");
+        });
     });
 
-    test("Message history operations", async (done) => {
+    test("Message history operations", async () => {
         const history = await clientA?.messages.retrieve(
             clientA.me.user().userID
         );
@@ -267,7 +266,6 @@ describe("Perform client tests", () => {
             clientA.me.user().userID
         );
         expect(postHistory?.length).toBe(0);
-        done();
     });
 
     // TODO: running multiple instances of the client introduces bugs.
@@ -278,7 +276,7 @@ describe("Perform client tests", () => {
     //     jest.setTimeout(10000);
     //     const clientB = await Client.create(undefined, {
     //         ...clientOptions,
-    //         logLevel: "info",
+    //         logLevel: "error",
     //     });
     //     await clientB.login(username, password);
     //     await clientB.connect();
