@@ -43,14 +43,14 @@ import type {
 import { MailType } from "@vex-chat/types";
 import ax, { AxiosError } from "axios";
 import { isBrowser, isNode } from "browser-or-node";
-import btoa from "btoa";
+// btoa is native in browsers and Node 16+
 import pc from "picocolors";
 import { EventEmitter } from "eventemitter3";
 import { Packr } from "msgpackr";
 // useRecords:false emits standard msgpack (no nonstandard record extension).
 // moreTypes:false keeps the extension set to what every other decoder understands.
-// Packr.pack() returns Node Buffer, which axios sends correctly (plain Uint8Array
-// would have its pool buffer sent in full — see axios issue #4068).
+// useRecords:false emits standard msgpack (no nonstandard record extension).
+// moreTypes:false keeps the extension set to what every other decoder understands.
 const msgpack = new Packr({ useRecords: false, moreTypes: false });
 import objectHash from "object-hash";
 import nacl from "tweetnacl";
@@ -263,7 +263,7 @@ export interface IMe {
     /** Returns metadata for the currently authenticated device. */
     device: () => IDevice;
     /** Uploads and sets a new avatar image for the current user. */
-    setAvatar: (avatar: Buffer) => Promise<void>;
+    setAvatar: (avatar: Uint8Array) => Promise<void>;
 }
 
 /**
@@ -389,7 +389,7 @@ export interface IDevices {
  */
 export interface IFiles {
     /** Uploads and encrypts a file. */
-    create: (file: Buffer) => Promise<[IFileSQL, string]>;
+    create: (file: Uint8Array) => Promise<[IFileSQL, string]>;
     /** Downloads and decrypts a file using a file ID and key. */
     retrieve: (fileID: string, key: string) => Promise<IFileResponse | null>;
 }
@@ -400,7 +400,7 @@ export interface IFiles {
 export interface IEmojis {
     /** Uploads a custom emoji to a server. */
     create: (
-        emoji: Buffer,
+        emoji: Uint8Array,
         name: string,
         serverID: string,
     ) => Promise<IEmoji | null>;
@@ -1241,7 +1241,7 @@ export class Client extends EventEmitter {
                 },
             );
             const { user, token }: { user: IUser; token: string } =
-                msgpack.decode(Buffer.from(res.data));
+                msgpack.decode(new Uint8Array(res.data));
 
             const cookies = res.headers["set-cookie"];
             if (cookies) {
@@ -1290,7 +1290,7 @@ export class Client extends EventEmitter {
             user: IUser;
             exp: number;
             token: string;
-        } = msgpack.decode(Buffer.from(res.data));
+        } = msgpack.decode(new Uint8Array(res.data));
         return whoami;
     }
 
@@ -1391,7 +1391,7 @@ export class Client extends EventEmitter {
                     msgpack.encode(regMsg),
                     { headers: { "Content-Type": "application/msgpack" } },
                 );
-                this.setUser(msgpack.decode(Buffer.from(res.data)));
+                this.setUser(msgpack.decode(new Uint8Array(res.data)));
                 return [this.getUser(), null];
             } catch (err) {
                 if (err.response) {
@@ -1414,14 +1414,14 @@ export class Client extends EventEmitter {
 
     private async redeemInvite(inviteID: string): Promise<IPermission> {
         const res = await ax.patch(this.getHost() + "/invite/" + inviteID);
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveInvites(serverID: string): Promise<IInvite[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/invites",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async createInvite(serverID: string, duration: string) {
@@ -1435,14 +1435,14 @@ export class Client extends EventEmitter {
             payload,
         );
 
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveEmojiList(serverID: string): Promise<IEmoji[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/emoji",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveEmojiByID(emojiID: string): Promise<IEmoji | null> {
@@ -1453,7 +1453,7 @@ export class Client extends EventEmitter {
         if (!res.data) {
             return null;
         }
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async leaveServer(serverID: string): Promise<void> {
@@ -1491,7 +1491,7 @@ export class Client extends EventEmitter {
     }
 
     private async uploadEmoji(
-        emoji: Buffer,
+        emoji: Uint8Array,
         name: string,
         serverID: string,
     ): Promise<IEmoji | null> {
@@ -1523,7 +1523,7 @@ export class Client extends EventEmitter {
                         },
                     },
                 );
-                return msgpack.decode(Buffer.from(res.data));
+                return msgpack.decode(new Uint8Array(res.data));
             } catch (err) {
                 return null;
             }
@@ -1539,7 +1539,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(payload),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -1554,7 +1554,7 @@ export class Client extends EventEmitter {
                     "/device/" +
                     XUtils.encodeHex(this.signKeys.publicKey),
             );
-            device = msgpack.decode(Buffer.from(res.data));
+            device = msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             this.log.error(err.toString());
             if (err.response?.status === 404) {
@@ -1629,7 +1629,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(devMsg),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             throw err;
         }
@@ -1649,14 +1649,14 @@ export class Client extends EventEmitter {
             const res = await ax.get(this.getHost() + "/token/" + type, {
                 responseType: "arraybuffer",
             });
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             this.log.warn(err.toString());
             return null;
         }
     }
 
-    private async uploadAvatar(avatar: Buffer): Promise<void> {
+    private async uploadAvatar(avatar: Uint8Array): Promise<void> {
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
             fpayload.set("avatar", new Blob([new Uint8Array(avatar)]));
@@ -1718,7 +1718,7 @@ export class Client extends EventEmitter {
                 serverID +
                 "/permissions",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     /**
@@ -1730,7 +1730,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/permissions",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async deletePermission(permissionID: string): Promise<void> {
@@ -1745,7 +1745,7 @@ export class Client extends EventEmitter {
             const detailsRes = await ax.get(
                 this.getHost() + "/file/" + fileID + "/details",
             );
-            const details = msgpack.decode(Buffer.from(detailsRes.data));
+            const details = msgpack.decode(new Uint8Array(detailsRes.data));
 
             const res = await ax.get(this.getHost() + "/file/" + fileID, {
                 onDownloadProgress: (progressEvent) => {
@@ -1767,7 +1767,7 @@ export class Client extends EventEmitter {
             const fileData = res.data;
 
             const decrypted = nacl.secretbox.open(
-                Uint8Array.from(Buffer.from(fileData)),
+                new Uint8Array(fileData),
                 XUtils.decodeHex(details.nonce),
                 XUtils.decodeHex(key),
             );
@@ -1775,7 +1775,7 @@ export class Client extends EventEmitter {
             if (decrypted) {
                 const resp: IFileResponse = {
                     details,
-                    data: Buffer.from(decrypted),
+                    data: new Uint8Array(decrypted),
                 };
                 return resp;
             }
@@ -1820,16 +1820,14 @@ export class Client extends EventEmitter {
     }
 
     // returns the file details and the encryption key
-    private async createFile(file: Buffer): Promise<[IFileSQL, string]> {
-        this.log.info(
-            "Creating file, size: " + formatBytes(Buffer.byteLength(file)),
-        );
+    private async createFile(file: Uint8Array): Promise<[IFileSQL, string]> {
+        this.log.info("Creating file, size: " + formatBytes(file.byteLength));
 
         const nonce = xMakeNonce();
         const key = nacl.box.keyPair();
         const box = nacl.secretbox(Uint8Array.from(file), nonce, key.secretKey);
 
-        this.log.info("Encrypted size: " + formatBytes(Buffer.byteLength(box)));
+        this.log.info("Encrypted size: " + formatBytes(box.byteLength));
 
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
@@ -1856,7 +1854,7 @@ export class Client extends EventEmitter {
                 },
             });
             const fcreatedFile: IFileSQL = msgpack.decode(
-                Buffer.from(fres.data),
+                new Uint8Array(fres.data),
             );
 
             return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
@@ -1876,14 +1874,14 @@ export class Client extends EventEmitter {
             msgpack.encode(payload),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        const createdFile: IFileSQL = msgpack.decode(Buffer.from(res.data));
+        const createdFile: IFileSQL = msgpack.decode(new Uint8Array(res.data));
 
         return [createdFile, XUtils.encodeHex(key.secretKey)];
     }
 
     private async getUserList(channelID: string): Promise<IUser[]> {
         const res = await ax.post(this.getHost() + "/userList/" + channelID);
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async markSessionVerified(sessionID: string) {
@@ -2018,8 +2016,10 @@ export class Client extends EventEmitter {
     }
 
     private async createServer(name: string): Promise<IServer> {
-        const res = await ax.post(this.getHost() + "/server/" + btoa(name));
-        return msgpack.decode(Buffer.from(res.data));
+        const res = await ax.post(
+            this.getHost() + "/server/" + globalThis.btoa(name),
+        );
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async forward(message: IMessage) {
@@ -2158,7 +2158,7 @@ export class Client extends EventEmitter {
         this.emit("message", outMsg);
 
         await new Promise((res, rej) => {
-            const callback = async (packedMsg: Buffer) => {
+            const callback = async (packedMsg: Uint8Array) => {
                 const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
@@ -2186,7 +2186,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/servers",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async createChannel(
@@ -2199,7 +2199,7 @@ export class Client extends EventEmitter {
             msgpack.encode(body),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async getDeviceByID(deviceID: string): Promise<IDevice | null> {
@@ -2217,7 +2217,7 @@ export class Client extends EventEmitter {
         try {
             const res = await ax.get(this.getHost() + "/device/" + deviceID);
             this.log.info("Retrieved device from server.");
-            const fetchedDevice = msgpack.decode(Buffer.from(res.data));
+            const fetchedDevice = msgpack.decode(new Uint8Array(res.data));
             this.deviceRecords[deviceID] = fetchedDevice;
             await this.database.saveDevice(fetchedDevice);
             return fetchedDevice;
@@ -2249,7 +2249,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(userIDs),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const devices: IDevice[] = msgpack.decode(Buffer.from(res.data));
+            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -2265,7 +2265,7 @@ export class Client extends EventEmitter {
             const res = await ax.get(
                 this.getHost() + "/user/" + userID + "/devices",
             );
-            const devices: IDevice[] = msgpack.decode(Buffer.from(res.data));
+            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -2279,7 +2279,7 @@ export class Client extends EventEmitter {
     private async getServerByID(serverID: string): Promise<IServer | null> {
         try {
             const res = await ax.get(this.getHost() + "/server/" + serverID);
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -2288,7 +2288,7 @@ export class Client extends EventEmitter {
     private async getChannelByID(channelID: string): Promise<IChannel | null> {
         try {
             const res = await ax.get(this.getHost() + "/channel/" + channelID);
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -2298,7 +2298,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/channels",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     /* Get the currently logged in user. You cannot call this until 
@@ -2339,7 +2339,7 @@ export class Client extends EventEmitter {
             const res = await ax.get(
                 this.getHost() + "/user/" + userIdentifier,
             );
-            const userRecord = msgpack.decode(Buffer.from(res.data));
+            const userRecord = msgpack.decode(new Uint8Array(res.data));
             this.userRecords[userIdentifier] = userRecord;
             return [userRecord, null];
         } catch (err) {
@@ -2518,7 +2518,7 @@ export class Client extends EventEmitter {
 
         // send mail and wait for response
         await new Promise((res, rej) => {
-            const callback = (packedMsg: Buffer) => {
+            const callback = (packedMsg: Uint8Array) => {
                 const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
@@ -3006,7 +3006,7 @@ export class Client extends EventEmitter {
                 throw error;
             });
 
-            this.conn.on("message", async (message: Uint8Array | Buffer) => {
+            this.conn.on("message", async (message: Uint8Array) => {
                 const [header, msg] = XUtils.unpackMessage(message);
 
                 this.log.debug(
@@ -3105,7 +3105,7 @@ export class Client extends EventEmitter {
                     "/mail",
             );
             const inbox: Array<[Uint8Array, IMailWS, Date]> = msgpack
-                .decode(Buffer.from(res.data))
+                .decode(new Uint8Array(res.data))
                 .sort(
                     (
                         a: [Uint8Array, IMailWS, Date],
@@ -3156,7 +3156,7 @@ export class Client extends EventEmitter {
         const res = await ax.post(
             this.getHost() + "/device/" + deviceID + "/keyBundle",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async getOTKCount(): Promise<number> {
@@ -3166,7 +3166,7 @@ export class Client extends EventEmitter {
                 this.getDevice().deviceID +
                 "/otk/count",
         );
-        return msgpack.decode(Buffer.from(res.data)).count;
+        return msgpack.decode(new Uint8Array(res.data)).count;
     }
 
     private async submitOTK(amount: number) {
