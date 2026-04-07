@@ -657,18 +657,18 @@ export declare interface Client {
  */
 export class Client extends EventEmitter {
     /**
-     * Loads a key file from disk.
+     * Encrypts a secret key with a password.
      *
      * Pass-through utility from `@vex-chat/crypto`.
      */
-    public static loadKeyFile = XUtils.loadKeyFile;
+    public static encryptKeyData = XUtils.encryptKeyData;
 
     /**
-     * Saves a key file to disk.
+     * Decrypts a secret key from encrypted data produced by encryptKeyData().
      *
      * Pass-through utility from `@vex-chat/crypto`.
      */
-    public static saveKeyFile = XUtils.saveKeyFile;
+    public static decryptKeyData = XUtils.decryptKeyData;
 
     /**
      * Creates and initializes a client in one step.

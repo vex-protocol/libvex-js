@@ -35,3 +35,4 @@ export type {
     IWebSocketCtor,
     IWebSocketLike,
 } from "./transport/types.js";
+export type { PlatformPreset } from "./preset/types.js";
