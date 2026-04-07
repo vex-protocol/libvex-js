@@ -1,55 +1,20 @@
 /**
- * Vite plugin that makes Node-only modules throw when imported
+ * Vite plugin that makes Node builtins throw when imported
  * from library source (src/) but NOT from test harness (__tests__/).
  *
  * Catches the bug class: "works in Node test env, crashes in browser/RN prod."
+ *
+ * Uses Node's own builtinModules list — no manual maintenance needed.
+ * Third-party npm packages are NOT poisoned; if they depend on Node
+ * builtins, the bundler will fail to resolve those imports naturally.
  */
+import { builtinModules } from "node:module";
 import type { Plugin } from "vite";
 
-/**
- * Strict list: modules that must NEVER appear in browser/RN code paths.
- * Start narrow (ws, better-sqlite3, node builtins used in storage/transport)
- * and widen as Client.ts is cleaned up.
- *
- * Known pre-existing violations in master Client.ts (not yet poisoned):
- *   chalk, winston, events, browser-or-node, btoa, node:os, node:perf_hooks
- * These will be addressed when the full adapter migration lands.
- */
-/**
- * ALL Node-only modules that must not appear in browser/RN code paths.
- * Browser test won't pass until Client.ts is fully decoupled from Node.
- * That's intentional — don't narrow this list to make tests green.
- */
-const NODE_MODULES = [
-    // Node built-in modules
-    "fs",
-    "node:fs",
-    "crypto",
-    "node:crypto",
-    "path",
-    "node:path",
-    "os",
-    "node:os",
-    "net",
-    "node:net",
-    "http",
-    "node:http",
-    "https",
-    "node:https",
-    "stream",
-    "node:stream",
-    "events",
-    "node:events",
-    "child_process",
-    "node:child_process",
-    "perf_hooks",
-    "node:perf_hooks",
-    // Node-only npm packages
-    "ws",
-    "better-sqlite3",
-    "knex",
-    "winston",
-];
+const nodeBuiltins = new Set([
+    ...builtinModules,
+    ...builtinModules.map((m) => `node:${m}`),
+]);
 
 export function poisonNodeImports(): Plugin {
     return {
@@ -62,7 +27,7 @@ export function poisonNodeImports(): Plugin {
             if (importer.includes("node_modules")) return null;
 
             const bare = source.replace(/\.js$/, "").replace(/\.ts$/, "");
-            if (NODE_MODULES.includes(bare)) {
+            if (nodeBuiltins.has(bare)) {
                 return `\0poisoned:${source}`;
             }
             return null;
@@ -70,7 +35,7 @@ export function poisonNodeImports(): Plugin {
         load(id: string) {
             if (!id.startsWith("\0poisoned:")) return null;
             const mod = id.slice("\0poisoned:".length);
-            return `throw new Error("[platform-guard] Node module '${mod}' imported in browser/RN context — this would crash in production.");`;
+            return `throw new Error("[platform-guard] Node builtin '${mod}' imported in browser/RN context — this would crash in production.");`;
         },
     };
 }
