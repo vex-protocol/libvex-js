@@ -44,7 +44,7 @@ import { MailType } from "@vex-chat/types";
 import ax, { AxiosError } from "axios";
 import { isBrowser, isNode } from "browser-or-node";
 import btoa from "btoa";
-import chalk from "chalk";
+import pc from "picocolors";
 import { EventEmitter } from "events";
 import { Packr } from "msgpackr";
 // useRecords:false emits standard msgpack (no nonstandard record extension).
@@ -2971,10 +2971,10 @@ export class Client extends EventEmitter {
                 const [header, msg] = XUtils.unpackMessage(message);
 
                 this.log.debug(
-                    chalk.red.bold("INH ") + XUtils.encodeHex(header),
+                    pc.red(pc.bold("INH ") + XUtils.encodeHex(header)),
                 );
                 this.log.debug(
-                    chalk.red.bold("IN ") + JSON.stringify(msg, null, 4),
+                    pc.red(pc.bold("IN ") + JSON.stringify(msg, null, 4)),
                 );
 
                 switch (msg.type) {
@@ -3103,10 +3103,12 @@ export class Client extends EventEmitter {
         }
 
         this.log.debug(
-            chalk.red.bold("OUTH ") +
-                XUtils.encodeHex(header || XUtils.emptyHeader()),
+            pc.red(
+                pc.bold("OUTH ") +
+                    XUtils.encodeHex(header || XUtils.emptyHeader()),
+            ),
         );
-        this.log.debug(chalk.red.bold("OUT ") + JSON.stringify(msg, null, 4));
+        this.log.debug(pc.red(pc.bold("OUT ") + JSON.stringify(msg, null, 4)));
 
         this.conn.send(XUtils.packMessage(msg, header));
     }

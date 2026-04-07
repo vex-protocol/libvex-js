@@ -49,7 +49,6 @@ const NODE_MODULES = [
     "better-sqlite3",
     "knex",
     "winston",
-    "chalk",
 ];
 
 export function poisonNodeImports(): Plugin {
