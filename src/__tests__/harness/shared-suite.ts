@@ -7,8 +7,8 @@
 
 import { Client } from "../../index.js";
 import type { IClientOptions, IMessage } from "../../index.js";
+import type { IStorage } from "../../IStorage.js";
 import type { IClientAdapters } from "../../transport/types.js";
-import { Storage } from "../../Storage.js";
 
 function apiUrlOverrideFromEnv():
     | Pick<IClientOptions, "host" | "unsafeHttp">
@@ -25,6 +25,7 @@ function apiUrlOverrideFromEnv():
 export function platformSuite(
     platformName: string,
     makeAdapters: () => IClientAdapters,
+    makeStorage: (SK: string, opts: IClientOptions) => IStorage,
 ) {
     describe(`platform: ${platformName}`, () => {
         let client: Client;
@@ -40,7 +41,7 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage = new Storage(":memory:", SK, opts);
+            const storage = makeStorage(SK, opts);
             client = await Client.create(SK, opts, storage);
         });
 
