@@ -63,9 +63,6 @@ export function platformSuite(
         });
 
         test("connect (websocket auth)", async () => {
-            // This is the critical test.
-            // Cookie-based server + RN adapter → times out (no cookie on upgrade)
-            // Cookie-based server + Node/Browser adapter → succeeds
             await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(
                     () =>
