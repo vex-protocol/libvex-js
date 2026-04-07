@@ -1,9 +1,11 @@
 /**
- * Vite plugin that catches Node builtin imports from library source (src/)
- * during transformation — which vitest actually invokes, unlike resolveId
- * which gets bypassed in Node's module system.
+ * Vite plugin that catches Node builtin imports AND Node-only globals
+ * in library source (src/) during transformation.
  *
- * Catches the bug class: "works in Node test env, crashes in browser/RN prod."
+ * Vitest runs in Node where builtins resolve natively and globals like
+ * Buffer/process exist — so tests pass even when the code would crash
+ * in a browser or Tauri webview. This plugin catches those at transform
+ * time, which vitest does invoke.
  *
  * Uses Node's own builtinModules list — no manual maintenance needed.
  */
@@ -15,15 +17,30 @@ const nodeBuiltins = new Set([
     ...builtinModules.map((m) => `node:${m}`),
 ]);
 
+// Node-only globals that don't exist in browsers/Tauri/RN.
+// \bBuffer\b won't match ArrayBuffer or SharedArrayBuffer (no word boundary).
+const NODE_GLOBALS = ["Buffer", "process", "__dirname", "__filename"];
+
 // Matches: import ... from "events"  or  import ... from 'node:os'
 // Also: export ... from "events"
 const IMPORT_RE = /(?:import|export)\s+.*?\s+from\s+['"]([^'"]+)['"]/g;
 // Matches: await import("events")
 const DYNAMIC_IMPORT_RE = /import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
-function findBannedImports(code: string): { mod: string; line: number }[] {
-    const results: { mod: string; line: number }[] = [];
+/** Strip comments to avoid false positives on globals in JSDoc / inline comments. */
+function stripComments(code: string): string {
+    // Remove single-line comments, but not URLs (://), and multi-line comments
+    return code.replace(/\/\/(?!:).*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+type Violation = { kind: "import" | "global"; name: string; line: number };
+
+function findViolations(code: string): Violation[] {
+    const results: Violation[] = [];
     const lines = code.split("\n");
+    const strippedLines = stripComments(code).split("\n");
+
+    // Check imports against the original code (comments don't affect import syntax)
     for (let i = 0; i < lines.length; i++) {
         const lineText = lines[i];
         for (const re of [IMPORT_RE, DYNAMIC_IMPORT_RE]) {
@@ -32,12 +49,35 @@ function findBannedImports(code: string): { mod: string; line: number }[] {
             while ((match = re.exec(lineText)) !== null) {
                 const mod = match[1].replace(/\.js$/, "").replace(/\.ts$/, "");
                 if (nodeBuiltins.has(mod)) {
-                    results.push({ mod: match[1], line: i + 1 });
+                    results.push({
+                        kind: "import",
+                        name: match[1],
+                        line: i + 1,
+                    });
                 }
             }
         }
     }
+
+    // Check globals against comment-stripped code
+    for (let i = 0; i < strippedLines.length; i++) {
+        const lineText = strippedLines[i];
+        for (const g of NODE_GLOBALS) {
+            const re = new RegExp(`\\b${g}\\b`);
+            if (re.test(lineText)) {
+                results.push({ kind: "global", name: g, line: i + 1 });
+            }
+        }
+    }
+
     return results;
+}
+
+function isNodeOnlyFile(id: string): boolean {
+    // These files are only loaded via dynamic import on the Node path.
+    if (id.endsWith("/Storage.ts") || id.endsWith("/Storage.js")) return true;
+    if (id.includes("/utils/createLogger")) return true;
+    return false;
 }
 
 export function poisonNodeImports(): Plugin {
@@ -49,21 +89,18 @@ export function poisonNodeImports(): Plugin {
             if (!id.includes("/src/")) return null;
             if (id.includes("__tests__")) return null;
             if (id.includes("node_modules")) return null;
-            // Node-only modules that are only loaded via dynamic import
-            if (id.endsWith("/Storage.ts") || id.endsWith("/Storage.js"))
-                return null;
-            if (id.includes("/utils/createLogger")) return null;
+            if (isNodeOnlyFile(id)) return null;
 
-            const banned = findBannedImports(code);
-            if (banned.length === 0) return null;
+            const violations = findViolations(code);
+            if (violations.length === 0) return null;
 
             const file = id.replace(/^.*\/src\//, "src/");
-            const msgs = banned
-                .map((b) => `  line ${b.line}: ${b.mod}`)
+            const msgs = violations
+                .map((v) => `  line ${v.line}: ${v.name} (${v.kind})`)
                 .join("\n");
             throw new Error(
-                `[platform-guard] Node builtins imported in ${file}:\n${msgs}\n` +
-                    `These would crash in browser/RN. Use adapters or dynamic imports on the Node-only path.`,
+                `[platform-guard] Node-only code in ${file}:\n${msgs}\n` +
+                    `These would crash in browser/RN/Tauri. Use browser-safe alternatives or dynamic imports.`,
             );
         },
     };
