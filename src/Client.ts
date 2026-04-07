@@ -49,9 +49,23 @@ import { EventEmitter } from "eventemitter3";
 import { Packr } from "msgpackr";
 // useRecords:false emits standard msgpack (no nonstandard record extension).
 // moreTypes:false keeps the extension set to what every other decoder understands.
-// useRecords:false emits standard msgpack (no nonstandard record extension).
-// moreTypes:false keeps the extension set to what every other decoder understands.
-const msgpack = new Packr({ useRecords: false, moreTypes: false });
+const _packr = new Packr({ useRecords: false, moreTypes: false });
+// Packr.encode() returns a subarray of its internal pool buffer.
+// In browsers, XMLHttpRequest.send() sends the full underlying ArrayBuffer,
+// not just the slice — corrupting the payload (axios issue #4068).
+// Wrap encode to always return a fresh copy.
+const msgpack = {
+    encode: (value: any): Uint8Array => {
+        const packed = _packr.encode(value);
+        return new Uint8Array(
+            packed.buffer.slice(
+                packed.byteOffset,
+                packed.byteOffset + packed.byteLength,
+            ),
+        );
+    },
+    decode: _packr.decode.bind(_packr),
+};
 import objectHash from "object-hash";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
