@@ -2,11 +2,10 @@
  * Platform preset for Tauri (desktop) apps.
  *
  * - WebSocket: browser-native (Tauri webview)
- * - Storage:   @tauri-apps/plugin-sql (SQLite via Tauri IPC)
+ * - Storage:   Kysely + kysely-dialect-tauri + @tauri-apps/plugin-sql
  * - Logger:    console
  */
 import { BrowserWebSocket } from "../transport/browser.js";
-import { TauriStorage } from "../storage/tauri.js";
 import type { PlatformPreset } from "./types.js";
 import type { ILogger } from "../transport/types.js";
 
@@ -32,13 +31,8 @@ export function tauriPreset(): PlatformPreset {
             WebSocket: BrowserWebSocket as any,
         },
         async createStorage(dbName, privateKey, _logger) {
-            const storage = new TauriStorage(
-                dbName,
-                privateKey,
-                _logger ?? logger,
-            );
-            await storage.init();
-            return storage;
+            const { createTauriStorage } = await import("../storage/tauri.js");
+            return createTauriStorage(dbName, privateKey, _logger ?? logger);
         },
     };
 }

@@ -39,6 +39,14 @@
             "types": "./dist/storage/expo.d.ts",
             "import": "./dist/storage/expo.js"
         },
+        "./storage/sqlite": {
+            "types": "./dist/storage/sqlite.d.ts",
+            "import": "./dist/storage/sqlite.js"
+        },
+        "./storage/schema": {
+            "types": "./dist/storage/schema.d.ts",
+            "import": "./dist/storage/schema.js"
+        },
         "./keystore/node": {
             "types": "./dist/keystore/node.d.ts",
             "import": "./dist/keystore/node.js"
@@ -73,6 +81,7 @@
     },
     "devDependencies": {
         "@tauri-apps/plugin-sql": "^2.4.0",
+        "@types/better-sqlite3": "^7.6.13",
         "@types/browser-or-node": "^1.3.0",
         "@types/btoa": "^1.2.3",
         "@types/ed2curve": "^0.2.4",
@@ -82,11 +91,13 @@
         "@types/ws": "^8.5.10",
         "@typescript-eslint/eslint-plugin": "^8.57.1",
         "@typescript-eslint/parser": "^8.57.1",
+        "better-sqlite3": "^11.0.0",
         "dotenv": "^8.2.0",
         "eslint": "^10.1.0",
         "eslint-config-prettier": "^9.0.0",
         "expo-sqlite": "^14.0.6",
         "husky": "^9.1.7",
+        "kysely-dialect-tauri": "^1.2.1",
         "lint-staged": "^16.3.2",
         "prettier": "^3.2.0",
         "rimraf": "^6.1.3",
@@ -102,10 +113,9 @@
         "@vex-chat/crypto": "^1.1.1",
         "@vex-chat/types": "^1.0.1",
         "axios": "^1.7.0",
-        "better-sqlite3": "^11.0.0",
         "browser-or-node": "^1.3.0",
         "eventemitter3": "^5.0.4",
-        "knex": "^3.1.0",
+        "kysely": "^0.28.15",
         "msgpackr": "1.11.8",
         "object-hash": "^2.1.1",
         "parse-duration": "^2.0.0",
@@ -117,13 +127,25 @@
     },
     "peerDependencies": {
         "@tauri-apps/plugin-sql": ">=2.0.0",
-        "expo-sqlite": ">=14.0.0"
+        "better-sqlite3": ">=11.0.0",
+        "expo-sqlite": ">=14.0.0",
+        "kysely-dialect-tauri": ">=1.2.0",
+        "kysely-expo": ">=5.0.0"
     },
     "peerDependenciesMeta": {
         "@tauri-apps/plugin-sql": {
             "optional": true
         },
+        "better-sqlite3": {
+            "optional": true
+        },
         "expo-sqlite": {
+            "optional": true
+        },
+        "kysely-dialect-tauri": {
+            "optional": true
+        },
+        "kysely-expo": {
             "optional": true
         }
     },

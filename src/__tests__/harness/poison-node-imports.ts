@@ -75,7 +75,7 @@ function findViolations(code: string): Violation[] {
 
 function isNodeOnlyFile(id: string): boolean {
     // These files are only loaded via dynamic import on the Node path.
-    if (id.endsWith("/Storage.ts") || id.endsWith("/Storage.js")) return true;
+    if (id.includes("/storage/node")) return true;
     if (id.includes("/utils/createLogger")) return true;
     return false;
 }

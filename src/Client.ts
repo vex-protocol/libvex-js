@@ -75,7 +75,7 @@ import type {
     IWebSocketLike,
 } from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
-// Storage (knex/better-sqlite3) loaded lazily — only when no external storage is provided.
+// Storage (Kysely/better-sqlite3) loaded lazily — only when no external storage is provided.
 import { capitalize } from "./utils/capitalize.js";
 // createLogger (winston) loaded lazily — only in Node when no adapter logger is provided.
 
@@ -726,7 +726,7 @@ export class Client extends EventEmitter {
                     "No storage provided. When using adapters (browser/RN), pass storage from your PlatformPreset.",
                 );
             }
-            const { Storage } = await import("./Storage.js");
+            const { createNodeStorage } = await import("./storage/node.js");
             const dbFileName = opts?.inMemoryDb
                 ? ":memory:"
                 : XUtils.encodeHex(
@@ -737,10 +737,9 @@ export class Client extends EventEmitter {
             const dbPath = opts?.dbFolder
                 ? opts.dbFolder + "/" + dbFileName
                 : dbFileName;
-            resolvedStorage = new Storage(
+            resolvedStorage = createNodeStorage(
                 dbPath,
                 privateKey || XUtils.encodeHex(nacl.sign.keyPair().secretKey),
-                opts,
             );
         }
         const client = new Client(privateKey, opts, resolvedStorage);

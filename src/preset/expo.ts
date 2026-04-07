@@ -2,10 +2,10 @@
  * Platform preset for Expo / React Native apps.
  *
  * - WebSocket: browser-native (React Native's global WebSocket)
- * - Storage:   expo-sqlite
+ * - Storage:   Kysely + kysely-expo + expo-sqlite
  * - Logger:    console
  *
- * expo-sqlite is an optional peerDependency — only available in Expo apps.
+ * expo-sqlite and kysely-expo are optional peerDependencies.
  */
 import { BrowserWebSocket } from "../transport/browser.js";
 import type { PlatformPreset } from "./types.js";

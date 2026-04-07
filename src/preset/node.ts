@@ -2,7 +2,7 @@
  * Platform preset for Node.js (CLI tools, bots, tests).
  *
  * - WebSocket: ws (loaded dynamically)
- * - Storage:   knex + better-sqlite3
+ * - Storage:   Kysely + better-sqlite3
  * - Logger:    winston (loaded dynamically)
  *
  * Async because ws and winston are lazy-loaded to keep them out of
@@ -22,10 +22,8 @@ export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
             WebSocket: WebSocket as any,
         },
         async createStorage(dbName, privateKey, _logger) {
-            const { Storage } = await import("../Storage.js");
-            return new Storage(dbName, privateKey, {
-                logLevel: logLevel as any,
-            });
+            const { createNodeStorage } = await import("../storage/node.js");
+            return createNodeStorage(dbName, privateKey, _logger ?? logger);
         },
     };
 }
