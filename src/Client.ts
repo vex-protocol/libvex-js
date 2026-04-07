@@ -58,7 +58,7 @@ import { performance } from "node:perf_hooks";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
 import winston from "winston";
-import WebSocket from "ws";
+import type { IClientAdapters, IWebSocketLike } from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
 import { Storage } from "./Storage.js";
 import { capitalize } from "./utils/capitalize.js";
@@ -456,6 +456,8 @@ export interface IClientOptions {
     unsafeHttp?: boolean;
     /** Whether local message history should be persisted by default storage. */
     saveHistory?: boolean;
+    /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
+    adapters?: IClientAdapters;
 }
 
 // tslint:disable-next-line: interface-name
@@ -685,7 +687,20 @@ export class Client extends EventEmitter {
         options?: IClientOptions,
         storage?: IStorage,
     ): Promise<Client> => {
-        const client = new Client(privateKey, options, storage);
+        let opts = options;
+        if (!opts?.adapters) {
+            const { default: WebSocket } = await import("ws");
+            const { createLogger: makeLog } =
+                await import("./utils/createLogger.js");
+            opts = {
+                ...opts,
+                adapters: {
+                    logger: makeLog("libvex", opts?.logLevel),
+                    WebSocket: WebSocket as any,
+                },
+            };
+        }
+        const client = new Client(privateKey, opts, storage);
         await client.init();
         return client;
     };
@@ -1004,8 +1019,9 @@ export class Client extends EventEmitter {
 
     private database: IStorage;
     private dbPath: string;
-    private conn: WebSocket;
+    private conn: IWebSocketLike;
     private host: string;
+    private adapters: IClientAdapters;
 
     private firstMailFetch = true;
 
@@ -1086,10 +1102,15 @@ export class Client extends EventEmitter {
             this.close(true);
         });
 
-        // we want to initialize this later with login()
-        this.conn = new WebSocket("ws://localhost:1234");
-        // silence the error for connecting to junk ws
-        // tslint:disable-next-line: no-empty
+        if (!options?.adapters) {
+            throw new Error(
+                "No adapters provided. Use Client.create() which resolves adapters automatically.",
+            );
+        }
+        this.adapters = options.adapters;
+
+        // Placeholder connection — replaced by initSocket() during connect()
+        this.conn = new this.adapters.WebSocket("ws://localhost:1234");
         this.conn.onerror = () => {};
 
         this.log.info(
@@ -2919,10 +2940,13 @@ export class Client extends EventEmitter {
                 throw new Error("No token found, did you call login()?");
             }
 
-            this.conn = new WebSocket(
-                this.prefixes.WS + this.host + "/socket",
-                { headers: { Cookie: "auth=" + this.token } },
-            );
+            const wsUrl = this.prefixes.WS + this.host + "/socket";
+            // Pass cookie as option — Node ws forwards it as an upgrade header.
+            // Browser/RN WebSocket ignores the options object entirely,
+            // so the cookie never reaches the server on those platforms.
+            this.conn = new this.adapters.WebSocket(wsUrl, {
+                headers: { Cookie: "auth=" + this.token },
+            });
             this.conn.on("open", () => {
                 this.log.info("Connection opened.");
                 this.pingInterval = setInterval(this.ping.bind(this), 15000);
@@ -2930,6 +2954,10 @@ export class Client extends EventEmitter {
 
             this.conn.on("close", () => {
                 this.log.info("Connection closed.");
+                if (this.pingInterval) {
+                    clearInterval(this.pingInterval);
+                    this.pingInterval = null;
+                }
                 if (!this.manuallyClosing) {
                     this.emit("disconnect");
                 }
@@ -2939,7 +2967,7 @@ export class Client extends EventEmitter {
                 throw error;
             });
 
-            this.conn.on("message", async (message: Buffer) => {
+            this.conn.on("message", async (message: Uint8Array | Buffer) => {
                 const [header, msg] = XUtils.unpackMessage(message);
 
                 this.log.debug(
