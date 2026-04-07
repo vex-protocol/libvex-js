@@ -1354,6 +1354,9 @@ export class Client extends EventEmitter {
 
         this.log.info("Starting websocket.");
         this.initSocket();
+        // Yield the event loop so the WS open callback fires and sends the
+        // auth message before OTK generation blocks for ~5s on mobile.
+        await new Promise((r) => setTimeout(r, 0));
         await this.negotiateOTK();
     }
 
@@ -2993,14 +2996,17 @@ export class Client extends EventEmitter {
             }
 
             const wsUrl = this.prefixes.WS + this.host + "/socket";
-            // Pass cookie as option — Node ws forwards it as an upgrade header.
-            // Browser/RN WebSocket ignores the options object entirely,
-            // so the cookie never reaches the server on those platforms.
-            this.conn = new this.adapters.WebSocket(wsUrl, {
-                headers: { Cookie: "auth=" + this.token },
-            });
+            // Connect with no credentials in URL or headers (ADR-006).
+            // Auth happens post-connection: we send the JWT as the first
+            // message after open. This works on all platforms including
+            // React Native (which cannot send cookies on the HTTP upgrade).
+            this.conn = new this.adapters.WebSocket(wsUrl);
             this.conn.on("open", () => {
                 this.log.info("Connection opened.");
+                // Send auth as first message before anything else.
+                this.conn.send(
+                    JSON.stringify({ type: "auth", token: this.token }),
+                );
                 this.pingInterval = setInterval(this.ping.bind(this), 15000);
             });
 
