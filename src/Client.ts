@@ -57,12 +57,16 @@ import * as os from "node:os";
 import { performance } from "node:perf_hooks";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
-import winston from "winston";
-import type { IClientAdapters, IWebSocketLike } from "./transport/types.js";
+import type {
+    IClientAdapters,
+    ILogger,
+    IWebSocketLike,
+} from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
 import { Storage } from "./Storage.js";
 import { capitalize } from "./utils/capitalize.js";
-import { createLogger } from "./utils/createLogger.js";
+// createLogger (winston) loaded lazily — only in Node when no adapter logger is provided.
+
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
 import { uuidToUint8 } from "./utils/uint8uuid.js";
@@ -1044,7 +1048,7 @@ export class Client extends EventEmitter {
 
     private cookies: string[] = [];
 
-    private log: winston.Logger;
+    private log: ILogger;
 
     private pingInterval: ReturnType<typeof setTimeout> | null = null;
     private mailInterval?: NodeJS.Timeout;
@@ -1066,7 +1070,12 @@ export class Client extends EventEmitter {
     ) {
         super();
 
-        this.log = createLogger("client", options?.logLevel);
+        this.log = options?.adapters?.logger ?? {
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+        };
 
         this.prefixes = options?.unsafeHttp
             ? { HTTP: "http://", WS: "ws://" }
@@ -1916,7 +1925,7 @@ export class Client extends EventEmitter {
                     const { status } = result;
                     if (status === "rejected") {
                         this.log.warn("Message failed.");
-                        this.log.warn(result);
+                        this.log.warn(JSON.stringify(result));
                     }
                 }
             });
@@ -1972,7 +1981,7 @@ export class Client extends EventEmitter {
                 const { status } = result;
                 if (status === "rejected") {
                     this.log.warn("Message failed.");
-                    this.log.warn(result);
+                    this.log.warn(JSON.stringify(result));
                 }
             }
         });
@@ -2025,7 +2034,7 @@ export class Client extends EventEmitter {
                 const { status } = result;
                 if (status === "rejected") {
                     this.log.warn("Message failed.");
-                    this.log.warn(result);
+                    this.log.warn(JSON.stringify(result));
                 }
             }
         });

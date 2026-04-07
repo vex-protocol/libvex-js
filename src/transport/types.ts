@@ -1,8 +1,8 @@
 export interface ILogger {
-    info(message: string): void;
-    warn(message: string): void;
-    error(message: string): void;
-    debug(message: string): void;
+    info(message: string, ...args: any[]): void;
+    warn(message: string, ...args: any[]): void;
+    error(message: string, ...args: any[]): void;
+    debug(message: string, ...args: any[]): void;
 }
 
 export type IWebSocketCtor = new (
