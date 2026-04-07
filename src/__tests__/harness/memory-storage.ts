@@ -21,8 +21,8 @@ export class MemoryStorage extends EventEmitter implements IStorage {
     public ready = false;
     private messages: IMessage[] = [];
     private sessions: ISessionSQL[] = [];
-    private preKeys: IPreKeysSQL[] = [];
-    private oneTimeKeys: IPreKeysSQL[] = [];
+    private preKeys: (IPreKeysSQL & { privateKey?: string })[] = [];
+    private oneTimeKeys: (IPreKeysSQL & { privateKey?: string })[] = [];
     private devices: IDevice[] = [];
     private idKeys: nacl.BoxKeyPair;
     private nextPreKeyIndex = 1;
@@ -97,14 +97,20 @@ export class MemoryStorage extends EventEmitter implements IStorage {
         const added: IPreKeysSQL[] = [];
         for (const pk of preKeys) {
             const idx = oneTime ? this.nextOtkIndex++ : this.nextPreKeyIndex++;
-            const row: IPreKeysSQL = {
+            const row = {
                 index: idx,
+                privateKey: XUtils.encodeHex(pk.keyPair.secretKey),
                 publicKey: XUtils.encodeHex(pk.keyPair.publicKey),
                 signature: XUtils.encodeHex(pk.signature),
             };
             if (oneTime) this.oneTimeKeys.push(row);
             else this.preKeys.push(row);
-            added.push(row);
+            // Return without privateKey (matches real Storage behavior)
+            added.push({
+                index: idx,
+                publicKey: row.publicKey,
+                signature: row.signature,
+            });
         }
         return added;
     }
@@ -112,14 +118,25 @@ export class MemoryStorage extends EventEmitter implements IStorage {
     async getPreKeys(): Promise<IPreKeysCrypto | null> {
         if (this.preKeys.length === 0) return null;
         const pk = this.preKeys[0];
-        // We don't store privateKey in the SQL row returned by savePreKeys,
-        // but the real Storage does internally. For tests, find the matching key.
-        // Since we can't recover it from the public-only row, store it separately.
-        return null; // The real prekeys are stored by the crypto layer
+        if (!pk.privateKey) return null;
+        return {
+            keyPair: nacl.box.keyPair.fromSecretKey(
+                XUtils.decodeHex(pk.privateKey),
+            ),
+            signature: XUtils.decodeHex(pk.signature),
+        };
     }
 
     async getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
-        return null;
+        const otk = this.oneTimeKeys.find((k) => k.index === index);
+        if (!otk || !otk.privateKey) return null;
+        return {
+            keyPair: nacl.box.keyPair.fromSecretKey(
+                XUtils.decodeHex(otk.privateKey),
+            ),
+            signature: XUtils.decodeHex(otk.signature),
+            index: otk.index,
+        };
     }
 
     async deleteOneTimeKey(index: number): Promise<void> {
