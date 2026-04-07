@@ -704,10 +704,16 @@ export class Client extends EventEmitter {
                 },
             };
         }
-        // Lazily create Node Storage when no external storage is provided.
-        // This keeps knex/better-sqlite3/winston out of browser bundles.
+        // Lazily create Node Storage only on the Node path (no adapters).
+        // When adapters are provided (browser/RN), the caller must supply storage
+        // via PlatformPreset.createStorage() — there is no Node fallback.
         let resolvedStorage = storage;
         if (!resolvedStorage) {
+            if (opts?.adapters) {
+                throw new Error(
+                    "No storage provided. When using adapters (browser/RN), pass storage from your PlatformPreset.",
+                );
+            }
             const { Storage } = await import("./Storage.js");
             const dbFileName = opts?.inMemoryDb
                 ? ":memory:"
