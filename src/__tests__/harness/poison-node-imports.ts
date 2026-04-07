@@ -49,6 +49,10 @@ export function poisonNodeImports(): Plugin {
             if (!id.includes("/src/")) return null;
             if (id.includes("__tests__")) return null;
             if (id.includes("node_modules")) return null;
+            // Node-only modules that are only loaded via dynamic import
+            if (id.endsWith("/Storage.ts") || id.endsWith("/Storage.js"))
+                return null;
+            if (id.includes("/utils/createLogger")) return null;
 
             const banned = findBannedImports(code);
             if (banned.length === 0) return null;

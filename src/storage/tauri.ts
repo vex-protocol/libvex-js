@@ -14,7 +14,7 @@ import type {
     ISessionCrypto,
     ISessionSQL,
 } from "@vex-chat/types";
-import { EventEmitter } from "events";
+import { EventEmitter } from "eventemitter3";
 import nacl from "tweetnacl";
 import type { IMessage } from "../index.js";
 import type { IStorage } from "../IStorage.js";

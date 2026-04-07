@@ -45,7 +45,7 @@ import ax, { AxiosError } from "axios";
 import { isBrowser, isNode } from "browser-or-node";
 import btoa from "btoa";
 import pc from "picocolors";
-import { EventEmitter } from "events";
+import { EventEmitter } from "eventemitter3";
 import { Packr } from "msgpackr";
 // useRecords:false emits standard msgpack (no nonstandard record extension).
 // moreTypes:false keeps the extension set to what every other decoder understands.
@@ -53,8 +53,6 @@ import { Packr } from "msgpackr";
 // would have its pool buffer sent in full — see axios issue #4068).
 const msgpack = new Packr({ useRecords: false, moreTypes: false });
 import objectHash from "object-hash";
-import * as os from "node:os";
-import { performance } from "node:perf_hooks";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
 import type {
@@ -1382,7 +1380,10 @@ export class Client extends EventEmitter {
                 ),
                 preKeyIndex: this.xKeyRing.preKeys.index!,
                 password,
-                deviceName: `${os.platform()}`,
+                deviceName:
+                    typeof navigator !== "undefined"
+                        ? navigator.userAgent.slice(0, 64)
+                        : "node",
             };
             try {
                 const res = await ax.post(
@@ -1612,7 +1613,10 @@ export class Client extends EventEmitter {
             preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
             preKeySignature: XUtils.encodeHex(this.xKeyRing.preKeys.signature),
             preKeyIndex: this.xKeyRing.preKeys.index!,
-            deviceName: `${os.platform()}`,
+            deviceName:
+                typeof navigator !== "undefined"
+                    ? navigator.userAgent.slice(0, 64)
+                    : "node",
         };
 
         try {

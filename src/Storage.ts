@@ -7,7 +7,7 @@ import type {
     ISessionCrypto,
     ISessionSQL,
 } from "@vex-chat/types";
-import { EventEmitter } from "events";
+import { EventEmitter } from "eventemitter3";
 import knex, { type Knex } from "knex";
 import parseDuration from "parse-duration";
 import nacl from "tweetnacl";
