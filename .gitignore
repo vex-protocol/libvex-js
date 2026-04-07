@@ -12,7 +12,7 @@ databases
 test.key
 files
 avatars
-.yalc
-yalc.lock
+
 docs/
 .claude
+.npmrc

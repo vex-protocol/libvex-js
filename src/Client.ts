@@ -43,26 +43,42 @@ import type {
 import { MailType } from "@vex-chat/types";
 import ax, { AxiosError } from "axios";
 import { isBrowser, isNode } from "browser-or-node";
-import btoa from "btoa";
-import chalk from "chalk";
-import { EventEmitter } from "events";
+// btoa is native in browsers and Node 16+
+import pc from "picocolors";
+import { EventEmitter } from "eventemitter3";
 import { Packr } from "msgpackr";
 // useRecords:false emits standard msgpack (no nonstandard record extension).
 // moreTypes:false keeps the extension set to what every other decoder understands.
-// Packr.pack() returns Node Buffer, which axios sends correctly (plain Uint8Array
-// would have its pool buffer sent in full — see axios issue #4068).
-const msgpack = new Packr({ useRecords: false, moreTypes: false });
+const _packr = new Packr({ useRecords: false, moreTypes: false });
+// Packr.encode() returns a subarray of its internal pool buffer.
+// In browsers, XMLHttpRequest.send() sends the full underlying ArrayBuffer,
+// not just the slice — corrupting the payload (axios issue #4068).
+// Wrap encode to always return a fresh copy.
+const msgpack = {
+    encode: (value: any): Uint8Array => {
+        const packed = _packr.encode(value);
+        return new Uint8Array(
+            packed.buffer.slice(
+                packed.byteOffset,
+                packed.byteOffset + packed.byteLength,
+            ),
+        );
+    },
+    decode: _packr.decode.bind(_packr),
+};
 import objectHash from "object-hash";
-import * as os from "node:os";
-import { performance } from "node:perf_hooks";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
-import winston from "winston";
-import WebSocket from "ws";
+import type {
+    IClientAdapters,
+    ILogger,
+    IWebSocketLike,
+} from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
-import { Storage } from "./Storage.js";
+// Storage (Kysely/better-sqlite3) loaded lazily — only when no external storage is provided.
 import { capitalize } from "./utils/capitalize.js";
-import { createLogger } from "./utils/createLogger.js";
+// createLogger (winston) loaded lazily — only in Node when no adapter logger is provided.
+
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
 import { uuidToUint8 } from "./utils/uint8uuid.js";
@@ -261,7 +277,7 @@ export interface IMe {
     /** Returns metadata for the currently authenticated device. */
     device: () => IDevice;
     /** Uploads and sets a new avatar image for the current user. */
-    setAvatar: (avatar: Buffer) => Promise<void>;
+    setAvatar: (avatar: Uint8Array) => Promise<void>;
 }
 
 /**
@@ -387,7 +403,7 @@ export interface IDevices {
  */
 export interface IFiles {
     /** Uploads and encrypts a file. */
-    create: (file: Buffer) => Promise<[IFileSQL, string]>;
+    create: (file: Uint8Array) => Promise<[IFileSQL, string]>;
     /** Downloads and decrypts a file using a file ID and key. */
     retrieve: (fileID: string, key: string) => Promise<IFileResponse | null>;
 }
@@ -398,7 +414,7 @@ export interface IFiles {
 export interface IEmojis {
     /** Uploads a custom emoji to a server. */
     create: (
-        emoji: Buffer,
+        emoji: Uint8Array,
         name: string,
         serverID: string,
     ) => Promise<IEmoji | null>;
@@ -456,6 +472,8 @@ export interface IClientOptions {
     unsafeHttp?: boolean;
     /** Whether local message history should be persisted by default storage. */
     saveHistory?: boolean;
+    /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
+    adapters?: IClientAdapters;
 }
 
 // tslint:disable-next-line: interface-name
@@ -655,18 +673,18 @@ export declare interface Client {
  */
 export class Client extends EventEmitter {
     /**
-     * Loads a key file from disk.
+     * Encrypts a secret key with a password.
      *
      * Pass-through utility from `@vex-chat/crypto`.
      */
-    public static loadKeyFile = XUtils.loadKeyFile;
+    public static encryptKeyData = XUtils.encryptKeyData;
 
     /**
-     * Saves a key file to disk.
+     * Decrypts a secret key from encrypted data produced by encryptKeyData().
      *
      * Pass-through utility from `@vex-chat/crypto`.
      */
-    public static saveKeyFile = XUtils.saveKeyFile;
+    public static decryptKeyData = XUtils.decryptKeyData;
 
     /**
      * Creates and initializes a client in one step.
@@ -685,7 +703,46 @@ export class Client extends EventEmitter {
         options?: IClientOptions,
         storage?: IStorage,
     ): Promise<Client> => {
-        const client = new Client(privateKey, options, storage);
+        let opts = options;
+        if (!opts?.adapters) {
+            const { default: WebSocket } = await import("ws");
+            const { createLogger: makeLog } =
+                await import("./utils/createLogger.js");
+            opts = {
+                ...opts,
+                adapters: {
+                    logger: makeLog("libvex", opts?.logLevel),
+                    WebSocket: WebSocket as any,
+                },
+            };
+        }
+        // Lazily create Node Storage only on the Node path (no adapters).
+        // When adapters are provided (browser/RN), the caller must supply storage
+        // via PlatformPreset.createStorage() — there is no Node fallback.
+        let resolvedStorage = storage;
+        if (!resolvedStorage) {
+            if (opts?.adapters) {
+                throw new Error(
+                    "No storage provided. When using adapters (browser/RN), pass storage from your PlatformPreset.",
+                );
+            }
+            const { createNodeStorage } = await import("./storage/node.js");
+            const dbFileName = opts?.inMemoryDb
+                ? ":memory:"
+                : XUtils.encodeHex(
+                      nacl.sign.keyPair.fromSecretKey(
+                          XUtils.decodeHex(privateKey || ""),
+                      ).publicKey,
+                  ) + ".sqlite";
+            const dbPath = opts?.dbFolder
+                ? opts.dbFolder + "/" + dbFileName
+                : dbFileName;
+            resolvedStorage = createNodeStorage(
+                dbPath,
+                privateKey || XUtils.encodeHex(nacl.sign.keyPair().secretKey),
+            );
+        }
+        const client = new Client(privateKey, opts, resolvedStorage);
         await client.init();
         return client;
     };
@@ -1004,8 +1061,9 @@ export class Client extends EventEmitter {
 
     private database: IStorage;
     private dbPath: string;
-    private conn: WebSocket;
+    private conn: IWebSocketLike;
     private host: string;
+    private adapters: IClientAdapters;
 
     private firstMailFetch = true;
 
@@ -1028,7 +1086,7 @@ export class Client extends EventEmitter {
 
     private cookies: string[] = [];
 
-    private log: winston.Logger;
+    private log: ILogger;
 
     private pingInterval: ReturnType<typeof setTimeout> | null = null;
     private mailInterval?: NodeJS.Timeout;
@@ -1050,7 +1108,12 @@ export class Client extends EventEmitter {
     ) {
         super();
 
-        this.log = createLogger("client", options?.logLevel);
+        this.log = options?.adapters?.logger ?? {
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+        };
 
         this.prefixes = options?.unsafeHttp
             ? { HTTP: "http://", WS: "ws://" }
@@ -1073,23 +1136,27 @@ export class Client extends EventEmitter {
             ? options?.dbFolder + "/" + dbFileName
             : dbFileName;
 
-        this.database = storage
-            ? storage
-            : new Storage(
-                  this.dbPath,
-                  XUtils.encodeHex(this.signKeys.secretKey),
-                  options,
-              );
+        if (!storage) {
+            throw new Error(
+                "No storage provided. Use Client.create() which resolves storage automatically.",
+            );
+        }
+        this.database = storage;
 
         this.database.on("error", (error) => {
             this.log.error(error.toString());
             this.close(true);
         });
 
-        // we want to initialize this later with login()
-        this.conn = new WebSocket("ws://localhost:1234");
-        // silence the error for connecting to junk ws
-        // tslint:disable-next-line: no-empty
+        if (!options?.adapters) {
+            throw new Error(
+                "No adapters provided. Use Client.create() which resolves adapters automatically.",
+            );
+        }
+        this.adapters = options.adapters;
+
+        // Placeholder connection — replaced by initSocket() during connect()
+        this.conn = new this.adapters.WebSocket("ws://localhost:1234");
         this.conn.onerror = () => {};
 
         this.log.info(
@@ -1187,7 +1254,7 @@ export class Client extends EventEmitter {
                 },
             );
             const { user, token }: { user: IUser; token: string } =
-                msgpack.decode(Buffer.from(res.data));
+                msgpack.decode(new Uint8Array(res.data));
 
             const cookies = res.headers["set-cookie"];
             if (cookies) {
@@ -1236,7 +1303,7 @@ export class Client extends EventEmitter {
             user: IUser;
             exp: number;
             token: string;
-        } = msgpack.decode(Buffer.from(res.data));
+        } = msgpack.decode(new Uint8Array(res.data));
         return whoami;
     }
 
@@ -1326,7 +1393,10 @@ export class Client extends EventEmitter {
                 ),
                 preKeyIndex: this.xKeyRing.preKeys.index!,
                 password,
-                deviceName: `${os.platform()}`,
+                deviceName:
+                    typeof navigator !== "undefined"
+                        ? navigator.userAgent.slice(0, 64)
+                        : "node",
             };
             try {
                 const res = await ax.post(
@@ -1334,7 +1404,7 @@ export class Client extends EventEmitter {
                     msgpack.encode(regMsg),
                     { headers: { "Content-Type": "application/msgpack" } },
                 );
-                this.setUser(msgpack.decode(Buffer.from(res.data)));
+                this.setUser(msgpack.decode(new Uint8Array(res.data)));
                 return [this.getUser(), null];
             } catch (err) {
                 if (err.response) {
@@ -1351,20 +1421,20 @@ export class Client extends EventEmitter {
     /**
      * Returns a compact `<username><deviceID>` debug label.
      */
-    public toString(): string {
+    public override toString(): string {
         return this.user?.username + "<" + this.device?.deviceID + ">";
     }
 
     private async redeemInvite(inviteID: string): Promise<IPermission> {
         const res = await ax.patch(this.getHost() + "/invite/" + inviteID);
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveInvites(serverID: string): Promise<IInvite[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/invites",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async createInvite(serverID: string, duration: string) {
@@ -1378,14 +1448,14 @@ export class Client extends EventEmitter {
             payload,
         );
 
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveEmojiList(serverID: string): Promise<IEmoji[]> {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/emoji",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async retrieveEmojiByID(emojiID: string): Promise<IEmoji | null> {
@@ -1396,7 +1466,7 @@ export class Client extends EventEmitter {
         if (!res.data) {
             return null;
         }
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async leaveServer(serverID: string): Promise<void> {
@@ -1434,7 +1504,7 @@ export class Client extends EventEmitter {
     }
 
     private async uploadEmoji(
-        emoji: Buffer,
+        emoji: Uint8Array,
         name: string,
         serverID: string,
     ): Promise<IEmoji | null> {
@@ -1466,7 +1536,7 @@ export class Client extends EventEmitter {
                         },
                     },
                 );
-                return msgpack.decode(Buffer.from(res.data));
+                return msgpack.decode(new Uint8Array(res.data));
             } catch (err) {
                 return null;
             }
@@ -1482,7 +1552,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(payload),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -1497,7 +1567,7 @@ export class Client extends EventEmitter {
                     "/device/" +
                     XUtils.encodeHex(this.signKeys.publicKey),
             );
-            device = msgpack.decode(Buffer.from(res.data));
+            device = msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             this.log.error(err.toString());
             if (err.response?.status === 404) {
@@ -1556,7 +1626,10 @@ export class Client extends EventEmitter {
             preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
             preKeySignature: XUtils.encodeHex(this.xKeyRing.preKeys.signature),
             preKeyIndex: this.xKeyRing.preKeys.index!,
-            deviceName: `${os.platform()}`,
+            deviceName:
+                typeof navigator !== "undefined"
+                    ? navigator.userAgent.slice(0, 64)
+                    : "node",
         };
 
         try {
@@ -1569,7 +1642,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(devMsg),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             throw err;
         }
@@ -1589,14 +1662,14 @@ export class Client extends EventEmitter {
             const res = await ax.get(this.getHost() + "/token/" + type, {
                 responseType: "arraybuffer",
             });
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             this.log.warn(err.toString());
             return null;
         }
     }
 
-    private async uploadAvatar(avatar: Buffer): Promise<void> {
+    private async uploadAvatar(avatar: Uint8Array): Promise<void> {
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
             fpayload.set("avatar", new Blob([new Uint8Array(avatar)]));
@@ -1658,7 +1731,7 @@ export class Client extends EventEmitter {
                 serverID +
                 "/permissions",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     /**
@@ -1670,7 +1743,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/permissions",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async deletePermission(permissionID: string): Promise<void> {
@@ -1685,7 +1758,7 @@ export class Client extends EventEmitter {
             const detailsRes = await ax.get(
                 this.getHost() + "/file/" + fileID + "/details",
             );
-            const details = msgpack.decode(Buffer.from(detailsRes.data));
+            const details = msgpack.decode(new Uint8Array(detailsRes.data));
 
             const res = await ax.get(this.getHost() + "/file/" + fileID, {
                 onDownloadProgress: (progressEvent) => {
@@ -1707,7 +1780,7 @@ export class Client extends EventEmitter {
             const fileData = res.data;
 
             const decrypted = nacl.secretbox.open(
-                Uint8Array.from(Buffer.from(fileData)),
+                new Uint8Array(fileData),
                 XUtils.decodeHex(details.nonce),
                 XUtils.decodeHex(key),
             );
@@ -1715,7 +1788,7 @@ export class Client extends EventEmitter {
             if (decrypted) {
                 const resp: IFileResponse = {
                     details,
-                    data: Buffer.from(decrypted),
+                    data: new Uint8Array(decrypted),
                 };
                 return resp;
             }
@@ -1732,9 +1805,9 @@ export class Client extends EventEmitter {
     /**
      * Initializes the keyring. This must be called before anything else.
      */
-    private async init() {
+    private async init(): Promise<void> {
         if (this.hasInit) {
-            return new Error("You should only call init() once.");
+            throw new Error("You should only call init() once.");
         }
         this.hasInit = true;
 
@@ -1760,16 +1833,14 @@ export class Client extends EventEmitter {
     }
 
     // returns the file details and the encryption key
-    private async createFile(file: Buffer): Promise<[IFileSQL, string]> {
-        this.log.info(
-            "Creating file, size: " + formatBytes(Buffer.byteLength(file)),
-        );
+    private async createFile(file: Uint8Array): Promise<[IFileSQL, string]> {
+        this.log.info("Creating file, size: " + formatBytes(file.byteLength));
 
         const nonce = xMakeNonce();
         const key = nacl.box.keyPair();
         const box = nacl.secretbox(Uint8Array.from(file), nonce, key.secretKey);
 
-        this.log.info("Encrypted size: " + formatBytes(Buffer.byteLength(box)));
+        this.log.info("Encrypted size: " + formatBytes(box.byteLength));
 
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
@@ -1796,7 +1867,7 @@ export class Client extends EventEmitter {
                 },
             });
             const fcreatedFile: IFileSQL = msgpack.decode(
-                Buffer.from(fres.data),
+                new Uint8Array(fres.data),
             );
 
             return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
@@ -1816,14 +1887,14 @@ export class Client extends EventEmitter {
             msgpack.encode(payload),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        const createdFile: IFileSQL = msgpack.decode(Buffer.from(res.data));
+        const createdFile: IFileSQL = msgpack.decode(new Uint8Array(res.data));
 
         return [createdFile, XUtils.encodeHex(key.secretKey)];
     }
 
     private async getUserList(channelID: string): Promise<IUser[]> {
         const res = await ax.post(this.getHost() + "/userList/" + channelID);
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async markSessionVerified(sessionID: string) {
@@ -1895,7 +1966,7 @@ export class Client extends EventEmitter {
                     const { status } = result;
                     if (status === "rejected") {
                         this.log.warn("Message failed.");
-                        this.log.warn(result);
+                        this.log.warn(JSON.stringify(result));
                     }
                 }
             });
@@ -1951,15 +2022,17 @@ export class Client extends EventEmitter {
                 const { status } = result;
                 if (status === "rejected") {
                     this.log.warn("Message failed.");
-                    this.log.warn(result);
+                    this.log.warn(JSON.stringify(result));
                 }
             }
         });
     }
 
     private async createServer(name: string): Promise<IServer> {
-        const res = await ax.post(this.getHost() + "/server/" + btoa(name));
-        return msgpack.decode(Buffer.from(res.data));
+        const res = await ax.post(
+            this.getHost() + "/server/" + globalThis.btoa(name),
+        );
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async forward(message: IMessage) {
@@ -2004,7 +2077,7 @@ export class Client extends EventEmitter {
                 const { status } = result;
                 if (status === "rejected") {
                     this.log.warn("Message failed.");
-                    this.log.warn(result);
+                    this.log.warn(JSON.stringify(result));
                 }
             }
         });
@@ -2098,7 +2171,7 @@ export class Client extends EventEmitter {
         this.emit("message", outMsg);
 
         await new Promise((res, rej) => {
-            const callback = async (packedMsg: Buffer) => {
+            const callback = async (packedMsg: Uint8Array) => {
                 const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
@@ -2126,7 +2199,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/servers",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async createChannel(
@@ -2139,7 +2212,7 @@ export class Client extends EventEmitter {
             msgpack.encode(body),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async getDeviceByID(deviceID: string): Promise<IDevice | null> {
@@ -2157,7 +2230,7 @@ export class Client extends EventEmitter {
         try {
             const res = await ax.get(this.getHost() + "/device/" + deviceID);
             this.log.info("Retrieved device from server.");
-            const fetchedDevice = msgpack.decode(Buffer.from(res.data));
+            const fetchedDevice = msgpack.decode(new Uint8Array(res.data));
             this.deviceRecords[deviceID] = fetchedDevice;
             await this.database.saveDevice(fetchedDevice);
             return fetchedDevice;
@@ -2189,7 +2262,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(userIDs),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const devices: IDevice[] = msgpack.decode(Buffer.from(res.data));
+            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -2205,7 +2278,7 @@ export class Client extends EventEmitter {
             const res = await ax.get(
                 this.getHost() + "/user/" + userID + "/devices",
             );
-            const devices: IDevice[] = msgpack.decode(Buffer.from(res.data));
+            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -2219,7 +2292,7 @@ export class Client extends EventEmitter {
     private async getServerByID(serverID: string): Promise<IServer | null> {
         try {
             const res = await ax.get(this.getHost() + "/server/" + serverID);
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -2228,7 +2301,7 @@ export class Client extends EventEmitter {
     private async getChannelByID(channelID: string): Promise<IChannel | null> {
         try {
             const res = await ax.get(this.getHost() + "/channel/" + channelID);
-            return msgpack.decode(Buffer.from(res.data));
+            return msgpack.decode(new Uint8Array(res.data));
         } catch (err) {
             return null;
         }
@@ -2238,7 +2311,7 @@ export class Client extends EventEmitter {
         const res = await ax.get(
             this.getHost() + "/server/" + serverID + "/channels",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     /* Get the currently logged in user. You cannot call this until 
@@ -2279,7 +2352,7 @@ export class Client extends EventEmitter {
             const res = await ax.get(
                 this.getHost() + "/user/" + userIdentifier,
             );
-            const userRecord = msgpack.decode(Buffer.from(res.data));
+            const userRecord = msgpack.decode(new Uint8Array(res.data));
             this.userRecords[userIdentifier] = userRecord;
             return [userRecord, null];
         } catch (err) {
@@ -2458,7 +2531,7 @@ export class Client extends EventEmitter {
 
         // send mail and wait for response
         await new Promise((res, rej) => {
-            const callback = (packedMsg: Buffer) => {
+            const callback = (packedMsg: Uint8Array) => {
                 const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
@@ -2919,10 +2992,13 @@ export class Client extends EventEmitter {
                 throw new Error("No token found, did you call login()?");
             }
 
-            this.conn = new WebSocket(
-                this.prefixes.WS + this.host + "/socket",
-                { headers: { Cookie: "auth=" + this.token } },
-            );
+            const wsUrl = this.prefixes.WS + this.host + "/socket";
+            // Pass cookie as option — Node ws forwards it as an upgrade header.
+            // Browser/RN WebSocket ignores the options object entirely,
+            // so the cookie never reaches the server on those platforms.
+            this.conn = new this.adapters.WebSocket(wsUrl, {
+                headers: { Cookie: "auth=" + this.token },
+            });
             this.conn.on("open", () => {
                 this.log.info("Connection opened.");
                 this.pingInterval = setInterval(this.ping.bind(this), 15000);
@@ -2930,6 +3006,10 @@ export class Client extends EventEmitter {
 
             this.conn.on("close", () => {
                 this.log.info("Connection closed.");
+                if (this.pingInterval) {
+                    clearInterval(this.pingInterval);
+                    this.pingInterval = null;
+                }
                 if (!this.manuallyClosing) {
                     this.emit("disconnect");
                 }
@@ -2939,14 +3019,14 @@ export class Client extends EventEmitter {
                 throw error;
             });
 
-            this.conn.on("message", async (message: Buffer) => {
+            this.conn.on("message", async (message: Uint8Array) => {
                 const [header, msg] = XUtils.unpackMessage(message);
 
                 this.log.debug(
-                    chalk.red.bold("INH ") + XUtils.encodeHex(header),
+                    pc.red(pc.bold("INH ") + XUtils.encodeHex(header)),
                 );
                 this.log.debug(
-                    chalk.red.bold("IN ") + JSON.stringify(msg, null, 4),
+                    pc.red(pc.bold("IN ") + JSON.stringify(msg, null, 4)),
                 );
 
                 switch (msg.type) {
@@ -3038,7 +3118,7 @@ export class Client extends EventEmitter {
                     "/mail",
             );
             const inbox: Array<[Uint8Array, IMailWS, Date]> = msgpack
-                .decode(Buffer.from(res.data))
+                .decode(new Uint8Array(res.data))
                 .sort(
                     (
                         a: [Uint8Array, IMailWS, Date],
@@ -3075,10 +3155,12 @@ export class Client extends EventEmitter {
         }
 
         this.log.debug(
-            chalk.red.bold("OUTH ") +
-                XUtils.encodeHex(header || XUtils.emptyHeader()),
+            pc.red(
+                pc.bold("OUTH ") +
+                    XUtils.encodeHex(header || XUtils.emptyHeader()),
+            ),
         );
-        this.log.debug(chalk.red.bold("OUT ") + JSON.stringify(msg, null, 4));
+        this.log.debug(pc.red(pc.bold("OUT ") + JSON.stringify(msg, null, 4)));
 
         this.conn.send(XUtils.packMessage(msg, header));
     }
@@ -3087,7 +3169,7 @@ export class Client extends EventEmitter {
         const res = await ax.post(
             this.getHost() + "/device/" + deviceID + "/keyBundle",
         );
-        return msgpack.decode(Buffer.from(res.data));
+        return msgpack.decode(new Uint8Array(res.data));
     }
 
     private async getOTKCount(): Promise<number> {
@@ -3097,7 +3179,7 @@ export class Client extends EventEmitter {
                 this.getDevice().deviceID +
                 "/otk/count",
         );
-        return msgpack.decode(Buffer.from(res.data)).count;
+        return msgpack.decode(new Uint8Array(res.data)).count;
     }
 
     private async submitOTK(amount: number) {

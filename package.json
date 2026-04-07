@@ -1,6 +1,6 @@
 {
     "name": "@vex-chat/libvex",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Library for communicating with xchat server.",
     "type": "module",
     "sideEffects": false,
@@ -10,6 +10,50 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./preset/node": {
+            "types": "./dist/preset/node.d.ts",
+            "import": "./dist/preset/node.js"
+        },
+        "./preset/tauri": {
+            "types": "./dist/preset/tauri.d.ts",
+            "import": "./dist/preset/tauri.js"
+        },
+        "./preset/expo": {
+            "types": "./dist/preset/expo.d.ts",
+            "import": "./dist/preset/expo.js"
+        },
+        "./preset/test": {
+            "types": "./dist/preset/test.d.ts",
+            "import": "./dist/preset/test.js"
+        },
+        "./storage/node": {
+            "types": "./dist/storage/node.d.ts",
+            "import": "./dist/storage/node.js"
+        },
+        "./storage/tauri": {
+            "types": "./dist/storage/tauri.d.ts",
+            "import": "./dist/storage/tauri.js"
+        },
+        "./storage/expo": {
+            "types": "./dist/storage/expo.d.ts",
+            "import": "./dist/storage/expo.js"
+        },
+        "./storage/sqlite": {
+            "types": "./dist/storage/sqlite.d.ts",
+            "import": "./dist/storage/sqlite.js"
+        },
+        "./storage/schema": {
+            "types": "./dist/storage/schema.d.ts",
+            "import": "./dist/storage/schema.js"
+        },
+        "./keystore/node": {
+            "types": "./dist/keystore/node.d.ts",
+            "import": "./dist/keystore/node.js"
+        },
+        "./keystore/memory": {
+            "types": "./dist/keystore/memory.d.ts",
+            "import": "./dist/keystore/memory.js"
         }
     },
     "files": [
@@ -22,16 +66,22 @@
     },
     "scripts": {
         "build": "rimraf dist && tsc",
-        "format": "prettier '**/*.{ts,tsx,json,md}' --tab-width 4 --ignore-path .gitignore --write",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "lint": "eslint src/",
+        "lint:fix": "eslint src/ --fix",
+        "prepare": "husky",
         "prepack": "npm run build",
         "docs": "npx typedoc --options typedoc.json",
-        "test": "vitest run"
-    },
-    "peerDependencies": {
-        "@vex-chat/crypto": "1.1.0-rc.1",
-        "@vex-chat/types": "1.0.0-rc.1"
+        "test": "vitest run",
+        "test:node": "vitest run -c vitest.config.node.ts",
+        "test:browser": "vitest run -c vitest.config.browser.ts",
+        "test:rn": "vitest run -c vitest.config.rn.ts",
+        "test:platforms": "vitest run -c vitest.config.node.ts && vitest run -c vitest.config.browser.ts && vitest run -c vitest.config.rn.ts"
     },
     "devDependencies": {
+        "@tauri-apps/plugin-sql": "^2.4.0",
+        "@types/better-sqlite3": "^7.6.13",
         "@types/browser-or-node": "^1.3.0",
         "@types/btoa": "^1.2.3",
         "@types/ed2curve": "^0.2.4",
@@ -39,9 +89,16 @@
         "@types/object-hash": "^1.3.4",
         "@types/uuid": "^8.3.0",
         "@types/ws": "^8.5.10",
-        "@vex-chat/crypto": "1.1.0-rc.1",
-        "@vex-chat/types": "1.0.0-rc.1",
+        "@typescript-eslint/eslint-plugin": "^8.57.1",
+        "@typescript-eslint/parser": "^8.57.1",
+        "better-sqlite3": "^11.0.0",
         "dotenv": "^8.2.0",
+        "eslint": "^10.1.0",
+        "eslint-config-prettier": "^9.0.0",
+        "expo-sqlite": "^14.0.6",
+        "husky": "^9.1.7",
+        "kysely-dialect-tauri": "^1.2.1",
+        "lint-staged": "^16.3.2",
         "prettier": "^3.2.0",
         "rimraf": "^6.1.3",
         "typedoc": "^0.28.0",
@@ -53,19 +110,44 @@
     },
     "dependencies": {
         "@extrahash/sleep": "^1.0.0",
-        "msgpackr": "1.11.8",
+        "@vex-chat/crypto": "^1.1.1",
+        "@vex-chat/types": "^1.0.1",
         "axios": "^1.7.0",
         "browser-or-node": "^1.3.0",
-        "btoa": "^1.2.1",
-        "chalk": "^4.1.0",
-        "knex": "^3.1.0",
+        "eventemitter3": "^5.0.4",
+        "kysely": "^0.28.15",
+        "msgpackr": "1.11.8",
         "object-hash": "^2.1.1",
         "parse-duration": "^2.0.0",
-        "better-sqlite3": "^11.0.0",
+        "picocolors": "^1.1.1",
         "tweetnacl": "^1.0.3",
         "uuid": "^8.3.1",
         "winston": "^3.3.3",
         "ws": "^8.17.0"
+    },
+    "peerDependencies": {
+        "@tauri-apps/plugin-sql": ">=2.0.0",
+        "better-sqlite3": ">=11.0.0",
+        "expo-sqlite": ">=14.0.0",
+        "kysely-dialect-tauri": ">=1.2.0",
+        "kysely-expo": ">=5.0.0"
+    },
+    "peerDependenciesMeta": {
+        "@tauri-apps/plugin-sql": {
+            "optional": true
+        },
+        "better-sqlite3": {
+            "optional": true
+        },
+        "expo-sqlite": {
+            "optional": true
+        },
+        "kysely-dialect-tauri": {
+            "optional": true
+        },
+        "kysely-expo": {
+            "optional": true
+        }
     },
     "directories": {
         "doc": "docs"
@@ -81,5 +163,11 @@
     "publishConfig": {
         "access": "public",
         "registry": "https://registry.npmjs.org/"
+    },
+    "lint-staged": {
+        "*.ts": [
+            "eslint --fix",
+            "prettier --write"
+        ]
     }
 }
