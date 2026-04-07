@@ -63,7 +63,7 @@ import type {
     IWebSocketLike,
 } from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
-import { Storage } from "./Storage.js";
+// Storage (knex/better-sqlite3) loaded lazily — only when no external storage is provided.
 import { capitalize } from "./utils/capitalize.js";
 // createLogger (winston) loaded lazily — only in Node when no adapter logger is provided.
 
@@ -704,7 +704,28 @@ export class Client extends EventEmitter {
                 },
             };
         }
-        const client = new Client(privateKey, opts, storage);
+        // Lazily create Node Storage when no external storage is provided.
+        // This keeps knex/better-sqlite3/winston out of browser bundles.
+        let resolvedStorage = storage;
+        if (!resolvedStorage) {
+            const { Storage } = await import("./Storage.js");
+            const dbFileName = opts?.inMemoryDb
+                ? ":memory:"
+                : XUtils.encodeHex(
+                      nacl.sign.keyPair.fromSecretKey(
+                          XUtils.decodeHex(privateKey || ""),
+                      ).publicKey,
+                  ) + ".sqlite";
+            const dbPath = opts?.dbFolder
+                ? opts.dbFolder + "/" + dbFileName
+                : dbFileName;
+            resolvedStorage = new Storage(
+                dbPath,
+                privateKey || XUtils.encodeHex(nacl.sign.keyPair().secretKey),
+                opts,
+            );
+        }
+        const client = new Client(privateKey, opts, resolvedStorage);
         await client.init();
         return client;
     };
@@ -1098,13 +1119,12 @@ export class Client extends EventEmitter {
             ? options?.dbFolder + "/" + dbFileName
             : dbFileName;
 
-        this.database = storage
-            ? storage
-            : new Storage(
-                  this.dbPath,
-                  XUtils.encodeHex(this.signKeys.secretKey),
-                  options,
-              );
+        if (!storage) {
+            throw new Error(
+                "No storage provided. Use Client.create() which resolves storage automatically.",
+            );
+        }
+        this.database = storage;
 
         this.database.on("error", (error) => {
             this.log.error(error.toString());
