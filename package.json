@@ -61,8 +61,8 @@
     },
     "dependencies": {
         "@extrahash/sleep": "^1.0.0",
-        "@vex-chat/crypto": "^1.1.0-rc.2",
-        "@vex-chat/types": "^1.0.0-rc.2",
+        "@vex-chat/crypto": "^1.1.1",
+        "@vex-chat/types": "^1.0.1",
         "msgpackr": "1.11.8",
         "axios": "^1.7.0",
         "browser-or-node": "^1.3.0",
