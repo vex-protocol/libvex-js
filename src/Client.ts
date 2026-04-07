@@ -1452,9 +1452,9 @@ export class Client extends EventEmitter {
                 preKeyIndex: this.xKeyRing.preKeys.index!,
                 password,
                 deviceName:
-                    typeof navigator !== "undefined"
+                    typeof navigator !== "undefined" && navigator.userAgent
                         ? navigator.userAgent.slice(0, 64)
-                        : "node",
+                        : "unknown",
             };
             try {
                 const res = await ax.post(
