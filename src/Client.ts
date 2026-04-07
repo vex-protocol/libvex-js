@@ -1275,6 +1275,61 @@ export class Client extends EventEmitter {
     }
 
     /**
+     * Authenticates using the device's Ed25519 signing key (ADR-007).
+     * No password needed — proves possession of the private key via
+     * challenge-response. Issues a short-lived (1-hour) JWT.
+     *
+     * Used by auto-login when stored credentials have a deviceKey
+     * but no valid session.
+     */
+    public async loginWithDeviceKey(): Promise<Error | null> {
+        try {
+            const signKeyHex = XUtils.encodeHex(this.signKeys.publicKey);
+
+            // Step 1: Request challenge
+            const challengeRes = await ax.post(
+                this.getHost() + "/auth/device",
+                msgpack.encode({
+                    deviceID: this.device?.deviceID,
+                    signKey: signKeyHex,
+                }),
+                { headers: { "Content-Type": "application/msgpack" } },
+            );
+            const { challengeID, challenge } = challengeRes.data;
+
+            // Step 2: Sign the challenge nonce with our private key
+            const signed = XUtils.encodeHex(
+                nacl.sign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
+            );
+
+            // Step 3: Verify — server checks signature, issues JWT
+            const verifyRes = await ax.post(
+                this.getHost() + "/auth/device/verify",
+                msgpack.encode({ challengeID, signed }),
+                { headers: { "Content-Type": "application/msgpack" } },
+            );
+            const { user, token }: { user: IUser; token: string } =
+                msgpack.decode(new Uint8Array(verifyRes.data));
+
+            const cookies = verifyRes.headers["set-cookie"];
+            if (cookies) {
+                for (const cookie of cookies) {
+                    if (cookie.includes("auth")) {
+                        this.addCookie(cookie);
+                    }
+                }
+            }
+
+            this.setUser(user);
+            this.token = token;
+        } catch (err) {
+            this.log.error("Device-key auth failed: " + err);
+            return err instanceof Error ? err : new Error(String(err));
+        }
+        return null;
+    }
+
+    /**
      * Returns the authorization cookie details. Throws if you don't have a
      * valid authorization cookie.
      */
