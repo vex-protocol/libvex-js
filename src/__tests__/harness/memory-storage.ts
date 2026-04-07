@@ -21,8 +21,8 @@ export class MemoryStorage extends EventEmitter implements IStorage {
     public ready = false;
     private messages: IMessage[] = [];
     private sessions: ISessionSQL[] = [];
-    private preKeys: (IPreKeysSQL & { privateKey?: string })[] = [];
-    private oneTimeKeys: (IPreKeysSQL & { privateKey?: string })[] = [];
+    private preKeys: any[] = [];
+    private oneTimeKeys: any[] = [];
     private devices: IDevice[] = [];
     private idKeys: nacl.BoxKeyPair;
     private nextPreKeyIndex = 1;
@@ -110,7 +110,7 @@ export class MemoryStorage extends EventEmitter implements IStorage {
                 index: idx,
                 publicKey: row.publicKey,
                 signature: row.signature,
-            });
+            } as IPreKeysSQL);
         }
         return added;
     }

@@ -6,7 +6,7 @@ import type { IWebSocketLike } from "./types.js";
 
 export class BrowserWebSocket implements IWebSocketLike {
     private ws: WebSocket;
-    private listeners = new Map<string, Map<Function, EventListener>>();
+    private listeners = new Map<string, Map<Function, (ev: any) => void>>();
     onerror: ((err: any) => void) | null = null;
 
     constructor(url: string, _options?: object) {
@@ -20,7 +20,7 @@ export class BrowserWebSocket implements IWebSocketLike {
     }
 
     on(event: string, listener: (...args: any[]) => void) {
-        let wrapped: EventListener;
+        let wrapped: (ev: any) => void;
 
         if (event === "message") {
             // Browser WebSocket wraps data in MessageEvent — unwrap to Uint8Array
@@ -48,7 +48,7 @@ export class BrowserWebSocket implements IWebSocketLike {
     off(event: string, listener: (...args: any[]) => void) {
         const wrapped = this.listeners.get(event)?.get(listener);
         if (wrapped) {
-            this.ws.removeEventListener(event, wrapped);
+            this.ws.removeEventListener(event, wrapped as any);
             this.listeners.get(event)!.delete(listener);
         }
     }

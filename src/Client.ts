@@ -1422,7 +1422,7 @@ export class Client extends EventEmitter {
     /**
      * Returns a compact `<username><deviceID>` debug label.
      */
-    public toString(): string {
+    public override toString(): string {
         return this.user?.username + "<" + this.device?.deviceID + ">";
     }
 
@@ -1806,9 +1806,9 @@ export class Client extends EventEmitter {
     /**
      * Initializes the keyring. This must be called before anything else.
      */
-    private async init() {
+    private async init(): Promise<void> {
         if (this.hasInit) {
-            return new Error("You should only call init() once.");
+            throw new Error("You should only call init() once.");
         }
         this.hasInit = true;
 

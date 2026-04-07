@@ -11,9 +11,41 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
+        "./preset/node": {
+            "types": "./dist/preset/node.d.ts",
+            "import": "./dist/preset/node.js"
+        },
         "./preset/tauri": {
             "types": "./dist/preset/tauri.d.ts",
             "import": "./dist/preset/tauri.js"
+        },
+        "./preset/expo": {
+            "types": "./dist/preset/expo.d.ts",
+            "import": "./dist/preset/expo.js"
+        },
+        "./preset/test": {
+            "types": "./dist/preset/test.d.ts",
+            "import": "./dist/preset/test.js"
+        },
+        "./storage/node": {
+            "types": "./dist/storage/node.d.ts",
+            "import": "./dist/storage/node.js"
+        },
+        "./storage/tauri": {
+            "types": "./dist/storage/tauri.d.ts",
+            "import": "./dist/storage/tauri.js"
+        },
+        "./storage/expo": {
+            "types": "./dist/storage/expo.d.ts",
+            "import": "./dist/storage/expo.js"
+        },
+        "./keystore/node": {
+            "types": "./dist/keystore/node.d.ts",
+            "import": "./dist/keystore/node.js"
+        },
+        "./keystore/memory": {
+            "types": "./dist/keystore/memory.d.ts",
+            "import": "./dist/keystore/memory.js"
         }
     },
     "files": [
@@ -53,6 +85,7 @@
         "dotenv": "^8.2.0",
         "eslint": "^10.1.0",
         "eslint-config-prettier": "^9.0.0",
+        "expo-sqlite": "^14.0.6",
         "husky": "^9.1.7",
         "lint-staged": "^16.3.2",
         "prettier": "^3.2.0",
@@ -83,10 +116,14 @@
         "ws": "^8.17.0"
     },
     "peerDependencies": {
-        "@tauri-apps/plugin-sql": ">=2.0.0"
+        "@tauri-apps/plugin-sql": ">=2.0.0",
+        "expo-sqlite": ">=14.0.0"
     },
     "peerDependenciesMeta": {
         "@tauri-apps/plugin-sql": {
+            "optional": true
+        },
+        "expo-sqlite": {
             "optional": true
         }
     },
