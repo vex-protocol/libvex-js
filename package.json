@@ -1,6 +1,6 @@
 {
     "name": "@vex-chat/libvex",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "description": "Library for communicating with xchat server.",
     "type": "module",
     "sideEffects": false,
@@ -73,10 +73,9 @@
         "prepare": "husky",
         "prepack": "npm run build",
         "docs": "npx typedoc --options typedoc.json",
-        "test": "vitest run",
+        "test": "vitest run --workspace vitest.workspace.ts",
         "test:node": "vitest run -c vitest.config.node.ts",
-        "test:browser": "vitest run -c vitest.config.browser.ts",
-        "test:platforms": "vitest run -c vitest.config.node.ts && vitest run -c vitest.config.browser.ts"
+        "test:browser": "vitest run -c vitest.config.browser.ts"
     },
     "devDependencies": {
         "@tauri-apps/plugin-sql": "^2.4.0",
