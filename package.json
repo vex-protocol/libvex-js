@@ -73,7 +73,7 @@
         "prepare": "husky",
         "prepack": "npm run build",
         "docs": "npx typedoc --options typedoc.json",
-        "test": "vitest run --workspace vitest.workspace.ts",
+        "test": "vitest run",
         "test:node": "vitest run -c vitest.config.node.ts",
         "test:browser": "vitest run -c vitest.config.browser.ts"
     },
