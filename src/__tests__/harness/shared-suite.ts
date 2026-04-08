@@ -9,6 +9,7 @@ import { Client } from "../../index.js";
 import type { IClientOptions, IMessage } from "../../index.js";
 import type { IStorage } from "../../IStorage.js";
 import type { IClientAdapters } from "../../transport/types.js";
+import { testFile, testImage } from "./fixtures.js";
 
 function apiUrlOverrideFromEnv():
     | Pick<IClientOptions, "host" | "unsafeHttp">
@@ -485,6 +486,34 @@ export function platformSuite(
                 await device2.close().catch(() => {});
                 await sender.close().catch(() => {});
             }
+        });
+
+        test("file upload + download", async () => {
+            const [details, key] = await client.files.create(testFile);
+            expect(details.fileID).toBeTruthy();
+
+            const fetched = await client.files.retrieve(details.fileID, key);
+            expect(fetched).toBeTruthy();
+            expect(new Uint8Array(fetched!.data)).toEqual(testFile);
+        });
+
+        test("emoji upload", async () => {
+            const server = await client.servers.create("Emoji Test Server");
+            const emoji = await client.emoji.create(
+                testImage,
+                "testmoji",
+                server.serverID,
+            );
+            expect(emoji).toBeTruthy();
+
+            const list = await client.emoji.retrieveList(server.serverID);
+            expect(list.some((e) => e.emojiID === emoji!.emojiID)).toBe(true);
+
+            await client.servers.delete(server.serverID);
+        });
+
+        test("avatar upload", async () => {
+            await client.me.setAvatar(testImage);
         });
     });
 }
