@@ -168,5 +168,46 @@ export function platformSuite(
                 await client2.close().catch(() => {});
             }
         });
+
+        test("loginWithDeviceKey (auto-login)", async () => {
+            // Simulate app restart: create a new Client with the same
+            // device key, authenticate without password.
+            const deviceKey = client.getKeys().private;
+            const opts2: IClientOptions = {
+                inMemoryDb: true,
+                logLevel: "error",
+                dbLogLevel: "error",
+                adapters: makeAdapters(),
+                ...apiUrlOverrideFromEnv(),
+            };
+            const storage2 = makeStorage(deviceKey, opts2);
+            const client2 = await Client.create(deviceKey, opts2, storage2);
+
+            try {
+                const authErr = await client2.loginWithDeviceKey();
+                expect(authErr).toBeNull();
+
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error("device-key connect timed out")),
+                        10_000,
+                    );
+                    client2.on("connected", () => {
+                        clearTimeout(timer);
+                        resolve();
+                    });
+                    client2.connect().catch((err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    });
+                });
+
+                // Same user, same identity
+                expect(client2.me.user().userID).toBe(client.me.user().userID);
+                expect(client2.me.user().username).toBe(username);
+            } finally {
+                await client2.close().catch(() => {});
+            }
+        });
     });
 }
