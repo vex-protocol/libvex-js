@@ -1282,7 +1282,9 @@ export class Client extends EventEmitter {
                 }),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const { challengeID, challenge } = challengeRes.data;
+            const { challengeID, challenge } = msgpack.decode(
+                new Uint8Array(challengeRes.data),
+            );
 
             const signed = XUtils.encodeHex(
                 nacl.sign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
