@@ -6,17 +6,6 @@
  * importing from tweetnacl — future WASM migration only changes this file.
  */
 
-export interface KeyPair {
-    publicKey: Uint8Array;
-    secretKey: Uint8Array;
-}
-
-export interface IXKeyRing {
-    ephemeralKeys: KeyPair;
-    identityKeys: KeyPair;
-    preKeys: IPreKeysCrypto;
-}
-
 export interface IPreKeysCrypto {
     index?: number;
     keyPair: KeyPair;
@@ -31,4 +20,15 @@ export interface ISessionCrypto {
     sessionID: string;
     SK: Uint8Array;
     userID: string;
+}
+
+export interface IXKeyRing {
+    ephemeralKeys: KeyPair;
+    identityKeys: KeyPair;
+    preKeys: IPreKeysCrypto;
+}
+
+export interface KeyPair {
+    publicKey: Uint8Array;
+    secretKey: Uint8Array;
 }

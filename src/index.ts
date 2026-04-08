@@ -1,5 +1,4 @@
 export { Client } from "./Client.js";
-export { createCodec, msgpack } from "./codec.js";
 export type {
     IChannel,
     IChannels,
@@ -26,6 +25,7 @@ export type {
     IUser,
     IUsers,
 } from "./Client.js";
+export { createCodec, msgpack } from "./codec.js";
 export type { IStorage } from "./IStorage.js";
 
 export type { PlatformPreset } from "./preset/types.js";
@@ -35,6 +35,6 @@ export type {
     IWebSocketCtor,
     IWebSocketLike,
 } from "./transport/types.js";
+export type { KeyStore, StoredCredentials } from "./types/index.js";
 // Re-export app-facing types
 export type { IInvite } from "@vex-chat/types";
-export type { KeyStore, StoredCredentials } from "./types/index.js";

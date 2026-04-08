@@ -1,5 +1,9 @@
-import type { IDevice, IPreKeysSQL, ISessionSQL } from "@vex-chat/types";
+import type { IMessage } from "../index.js";
+import type { IStorage } from "../IStorage.js";
+import type { ILogger } from "../transport/types.js";
 import type { IPreKeysCrypto, ISessionCrypto } from "../types/index.js";
+import type { ClientDatabase } from "./schema.js";
+import type { IDevice, IPreKeysSQL, ISessionSQL } from "@vex-chat/types";
 import type { Kysely } from "kysely";
 
 /**
@@ -13,13 +17,9 @@ import type { Kysely } from "kysely";
  * ExpoStorage) with a single implementation.
  */
 import { XKeyConvert, XUtils } from "@vex-chat/crypto";
+
 import { EventEmitter } from "eventemitter3";
 import nacl from "tweetnacl";
-
-import type { IMessage } from "../index.js";
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
-import type { ClientDatabase } from "./schema.js";
 
 export class SqliteStorage extends EventEmitter implements IStorage {
     public ready = false;

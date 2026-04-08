@@ -1,5 +1,16 @@
 // tslint:disable: no-empty-interface
 
+import type { IStorage } from "./IStorage.js";
+import type {
+    IClientAdapters,
+    ILogger,
+    IWebSocketLike,
+} from "./transport/types.js";
+import type {
+    IPreKeysCrypto,
+    ISessionCrypto,
+    IXKeyRing,
+} from "./types/index.js";
 import type {
     IActionToken,
     IChallMsg,
@@ -24,14 +35,8 @@ import type {
     ISessionSQL,
     ISuccessMsg,
 } from "@vex-chat/types";
-import type {
-    IPreKeysCrypto,
-    ISessionCrypto,
-    IXKeyRing,
-} from "./types/index.js";
 import type { AxiosInstance } from "axios";
 
-import { sleep } from "@extrahash/sleep";
 import {
     xConcat,
     xConstants,
@@ -45,22 +50,16 @@ import {
     XUtils,
 } from "@vex-chat/crypto";
 import { MailType } from "@vex-chat/types";
+
+import { sleep } from "@extrahash/sleep";
 import axios, { type AxiosError } from "axios";
 import { EventEmitter } from "eventemitter3";
-import pc from "picocolors";
-
-import { msgpack } from "./codec.js";
 import objectHash from "object-hash";
+import pc from "picocolors";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
 
-import type { IStorage } from "./IStorage.js";
-import type {
-    IClientAdapters,
-    ILogger,
-    IWebSocketLike,
-} from "./transport/types.js";
-
+import { msgpack } from "./codec.js";
 import { capitalize } from "./utils/capitalize.js";
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";

@@ -1,3 +1,7 @@
+import type { IStorage } from "../IStorage.js";
+import type { ILogger } from "../transport/types.js";
+import type { ClientDatabase } from "./schema.js";
+
 /**
  * Tauri storage factory — creates SqliteStorage with kysely-dialect-tauri.
  *
@@ -5,10 +9,6 @@
  * only available inside a Tauri app.
  */
 import { Kysely } from "kysely";
-
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
-import type { ClientDatabase } from "./schema.js";
 
 import { SqliteStorage } from "./sqlite.js";
 

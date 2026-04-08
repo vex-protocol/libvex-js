@@ -1,5 +1,8 @@
 import type { KeyStore, StoredCredentials } from "../types/index.js";
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 /**
  * File-backed KeyStore for Node.js (CLI tools, bots, integration tests).
  *
@@ -7,8 +10,6 @@ import type { KeyStore, StoredCredentials } from "../types/index.js";
  * Node-only — imports node:fs.
  */
 import { XUtils } from "@vex-chat/crypto";
-import * as fs from "node:fs";
-import * as path from "node:path";
 
 export class NodeKeyStore implements KeyStore {
     private readonly dir: string;

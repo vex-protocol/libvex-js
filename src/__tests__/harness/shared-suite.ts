@@ -5,68 +5,13 @@
  * Runs register → login → connect → send/receive DM against a real spire.
  */
 
-import { Client } from "../../index.js";
 import type { IClientOptions, IMessage } from "../../index.js";
 import type { IStorage } from "../../IStorage.js";
 import type { IClientAdapters } from "../../transport/types.js";
+
+import { Client } from "../../index.js";
+
 import { testFile, testImage } from "./fixtures.js";
-
-async function connectAndWait(
-    c: Client,
-    label: string,
-    timeout = 10_000,
-): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error(`${label} connect timed out`)),
-            timeout,
-        );
-        const onConnected = () => {
-            clearTimeout(timer);
-            c.off("connected", onConnected);
-            resolve();
-        };
-        c.on("connected", onConnected);
-        c.connect().catch((err) => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-}
-
-async function waitForMessage(
-    c: Client,
-    predicate: (m: IMessage) => boolean,
-    label: string,
-    timeout = 10_000,
-): Promise<IMessage> {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error(`${label} message timed out`)),
-            timeout,
-        );
-        const onMsg = (msg: IMessage) => {
-            if (predicate(msg)) {
-                clearTimeout(timer);
-                c.off("message", onMsg);
-                resolve(msg);
-            }
-        };
-        c.on("message", onMsg);
-    });
-}
-
-function apiUrlOverrideFromEnv():
-    | Pick<IClientOptions, "host" | "unsafeHttp">
-    | undefined {
-    const raw = process.env.API_URL?.trim();
-    if (!raw) return undefined;
-    if (/^https?:\/\//i.test(raw)) {
-        const u = new URL(raw);
-        return { host: u.host, unsafeHttp: u.protocol === "http:" };
-    }
-    return { host: raw, unsafeHttp: true };
-}
 
 export function platformSuite(
     platformName: string,
@@ -84,10 +29,10 @@ export function platformSuite(
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
             const opts: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage = await makeStorage(SK, opts);
@@ -130,10 +75,10 @@ export function platformSuite(
         test("two-user DM", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -170,10 +115,10 @@ export function platformSuite(
         test("group messaging in channel", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -193,7 +138,7 @@ export function platformSuite(
                     server.serverID,
                 );
                 expect(channels.length).toBeGreaterThan(0);
-                const channel = channels[0]!;
+                const channel = channels[0];
 
                 // user1 creates invite, user2 redeems it
                 const invite = await client.invites.create(
@@ -230,10 +175,10 @@ export function platformSuite(
             const deviceKey = client.getKeys().private;
             const deviceID = client.me.device().deviceID;
             const opts2: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(deviceKey, opts2);
@@ -330,10 +275,10 @@ export function platformSuite(
         test.skip("multi-device message sync", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -342,10 +287,10 @@ export function platformSuite(
             // Sender: separate user
             const SK3 = Client.generateSecretKey();
             const opts3: IClientOptions = {
+                adapters: makeAdapters(),
+                dbLogLevel: "error",
                 inMemoryDb: true,
                 logLevel: "error",
-                dbLogLevel: "error",
-                adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
             const storage3 = await makeStorage(SK3, opts3);
@@ -370,11 +315,11 @@ export function platformSuite(
                 const waitForBoth = new Promise<void>((resolve, reject) => {
                     const timer = setTimeout(
                         () =>
-                            reject(
+                            { reject(
                                 new Error(
                                     `multi-device sync timed out (d1=${received.device1}, d2=${received.device2})`,
                                 ),
-                            ),
+                            ); },
                         15_000,
                     );
                     const check = () => {
@@ -444,5 +389,62 @@ export function platformSuite(
         test("avatar upload", async () => {
             await client.me.setAvatar(testImage);
         });
+    });
+}
+
+function apiUrlOverrideFromEnv():
+    | Pick<IClientOptions, "host" | "unsafeHttp">
+    | undefined {
+    const raw = process.env.API_URL?.trim();
+    if (!raw) return undefined;
+    if (/^https?:\/\//i.test(raw)) {
+        const u = new URL(raw);
+        return { host: u.host, unsafeHttp: u.protocol === "http:" };
+    }
+    return { host: raw, unsafeHttp: true };
+}
+
+async function connectAndWait(
+    c: Client,
+    label: string,
+    timeout = 10_000,
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => { reject(new Error(`${label} connect timed out`)); },
+            timeout,
+        );
+        const onConnected = () => {
+            clearTimeout(timer);
+            c.off("connected", onConnected);
+            resolve();
+        };
+        c.on("connected", onConnected);
+        c.connect().catch((err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+async function waitForMessage(
+    c: Client,
+    predicate: (m: IMessage) => boolean,
+    label: string,
+    timeout = 10_000,
+): Promise<IMessage> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => { reject(new Error(`${label} message timed out`)); },
+            timeout,
+        );
+        const onMsg = (msg: IMessage) => {
+            if (predicate(msg)) {
+                clearTimeout(timer);
+                c.off("message", onMsg);
+                resolve(msg);
+            }
+        };
+        c.on("message", onMsg);
     });
 }

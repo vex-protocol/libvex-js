@@ -1,8 +1,7 @@
-import type { IDevice, IPreKeysSQL } from "@vex-chat/types";
-import type { IPreKeysCrypto, ISessionCrypto } from "./types/index.js";
-import type { EventEmitter } from "eventemitter3";
-
 import type { IMessage, ISession } from "./index.js";
+import type { IPreKeysCrypto, ISessionCrypto } from "./types/index.js";
+import type { IDevice, IPreKeysSQL } from "@vex-chat/types";
+import type { EventEmitter } from "eventemitter3";
 /**
  * Storage contract used by `Client` for local persistence.
  *

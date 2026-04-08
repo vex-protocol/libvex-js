@@ -1,3 +1,6 @@
+import type { ILogger } from "../transport/types.js";
+import type { PlatformPreset } from "./types.js";
+
 /**
  * Platform preset for Expo / React Native apps.
  *
@@ -8,9 +11,6 @@
  * expo-sqlite and kysely-expo are optional peerDependencies.
  */
 import { Platform } from "react-native";
-
-import type { ILogger } from "../transport/types.js";
-import type { PlatformPreset } from "./types.js";
 
 import { BrowserWebSocket } from "../transport/browser.js";
 

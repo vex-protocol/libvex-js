@@ -26,6 +26,33 @@ export default tseslint.config(
             "@typescript-eslint/no-import-type-side-effects": "error",
             "@typescript-eslint/prefer-readonly": "error",
             "@typescript-eslint/require-array-sort-compare": "error",
+
+            "perfectionist/sort-imports": [
+                "error",
+                {
+                    type: "natural",
+                    order: "asc",
+                    ignoreCase: true,
+                    internalPattern: ["^@vex-chat/"],
+                    newlinesBetween: 1,
+                    customGroups: [
+                        {
+                            groupName: "type-imports",
+                            modifiers: ["type"],
+                        },
+                    ],
+                    groups: [
+                        "type-imports",
+                        "builtin",
+                        "internal",
+                        "external",
+                        "parent",
+                        "sibling",
+                        "index",
+                        "unknown",
+                    ],
+                },
+            ],
         },
     },
     {

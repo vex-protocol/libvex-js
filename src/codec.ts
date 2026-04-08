@@ -19,26 +19,6 @@ import { Packr } from "msgpackr";
 const _packr = new Packr({ moreTypes: false, useRecords: false });
 
 /**
- * Encode a value to msgpack. Returns a fresh Uint8Array copy
- * (not a subarray of the internal pool buffer) to avoid browser
- * XMLHttpRequest.send() corruption (axios issue #4068).
- */
-function encode(value: unknown): Uint8Array {
-    const packed = _packr.encode(value);
-    return new Uint8Array(
-        packed.buffer.slice(
-            packed.byteOffset,
-            packed.byteOffset + packed.byteLength,
-        ),
-    );
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function decode(data: Uint8Array): any {
-    return _packr.decode(data);
-}
-
-/**
  * Creates a type-safe codec for msgpack encode/decode.
  *
  * @param schema - A Zod schema to validate against
@@ -62,6 +42,26 @@ export function createCodec<T extends z.ZodType>(schema: T) {
             return encode(msg);
         },
     };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function decode(data: Uint8Array): any {
+    return _packr.decode(data);
+}
+
+/**
+ * Encode a value to msgpack. Returns a fresh Uint8Array copy
+ * (not a subarray of the internal pool buffer) to avoid browser
+ * XMLHttpRequest.send() corruption (axios issue #4068).
+ */
+function encode(value: unknown): Uint8Array {
+    const packed = _packr.encode(value);
+    return new Uint8Array(
+        packed.buffer.slice(
+            packed.byteOffset,
+            packed.byteOffset + packed.byteLength,
+        ),
+    );
 }
 
 /** Raw msgpack encode/decode without schema validation. */
