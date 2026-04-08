@@ -1,3 +1,4 @@
+import fc from "fast-check";
 /**
  * Property-based round-trip tests for msgpack codec.
  *
@@ -8,7 +9,6 @@
  * Uint8Array, arrays, plain objects. No Date, undefined, Map, Set.
  */
 import { describe, expect, it } from "vitest";
-import fc from "fast-check";
 
 import { msgpack } from "../codec.js";
 
@@ -24,7 +24,7 @@ const rec = <T extends Record<string, fc.Arbitrary<unknown>>>(arbs: T) =>
 
 const arbBaseMsg = rec({
     transmissionID: fc.uuid({ version: 4 }),
-    type: fc.string({ minLength: 1, maxLength: 32 }),
+    type: fc.string({ maxLength: 32, minLength: 1 }),
 });
 
 const arbSuccessMsg = rec({
@@ -69,24 +69,24 @@ const arbMailSQL = rec({
     readerID: fc.uuid({ version: 4 }),
     recipient: fc.uuid({ version: 4 }),
     sender: fc.uuid({ version: 4 }),
-    time: fc.string({ minLength: 10, maxLength: 30 }),
+    time: fc.string({ maxLength: 30, minLength: 10 }),
 });
 
 const arbServer = rec({
     icon: fc.option(fc.uuid({ version: 4 }), { nil: null }),
-    name: fc.string({ minLength: 1, maxLength: 64 }),
+    name: fc.string({ maxLength: 64, minLength: 1 }),
     serverID: fc.uuid({ version: 4 }),
 });
 
 const arbChannel = rec({
     channelID: fc.uuid({ version: 4 }),
-    name: fc.string({ minLength: 1, maxLength: 64 }),
+    name: fc.string({ maxLength: 64, minLength: 1 }),
     serverID: fc.uuid({ version: 4 }),
 });
 
 const arbPermission = rec({
     permissionID: fc.uuid({ version: 4 }),
-    powerLevel: fc.integer({ min: 0, max: 100 }),
+    powerLevel: fc.integer({ max: 100, min: 0 }),
     resourceID: fc.uuid({ version: 4 }),
     resourceType: fc.constant("server"),
     userID: fc.uuid({ version: 4 }),
@@ -95,23 +95,23 @@ const arbPermission = rec({
 const arbDevice = rec({
     deleted: fc.boolean(),
     deviceID: fc.uuid({ version: 4 }),
-    lastLogin: fc.string({ minLength: 10, maxLength: 30 }),
-    name: fc.string({ minLength: 1, maxLength: 32 }),
+    lastLogin: fc.string({ maxLength: 30, minLength: 10 }),
+    name: fc.string({ maxLength: 32, minLength: 1 }),
     owner: fc.uuid({ version: 4 }),
     signKey: hex(64),
 });
 
 const arbMailWS = rec({
     authorID: fc.uuid({ version: 4 }),
-    cipher: fc.uint8Array({ minLength: 1, maxLength: 128 }),
+    cipher: fc.uint8Array({ maxLength: 128, minLength: 1 }),
     extra: fc.uint8Array({ maxLength: 64 }),
     forward: fc.boolean(),
-    group: fc.option(fc.uint8Array({ minLength: 16, maxLength: 16 }), {
+    group: fc.option(fc.uint8Array({ maxLength: 16, minLength: 16 }), {
         nil: null,
     }),
     mailID: fc.uuid({ version: 4 }),
     mailType: fc.constantFrom(0, 1),
-    nonce: fc.uint8Array({ minLength: 24, maxLength: 24 }),
+    nonce: fc.uint8Array({ maxLength: 24, minLength: 24 }),
     readerID: fc.uuid({ version: 4 }),
     recipient: fc.uuid({ version: 4 }),
     sender: fc.uuid({ version: 4 }),
