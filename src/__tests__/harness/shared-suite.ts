@@ -84,7 +84,7 @@ export function platformSuite(
             });
         });
 
-        test("send and receive DM", async () => {
+        test("send and receive DM (self)", async () => {
             const me = client.me.user();
             await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(
@@ -102,6 +102,71 @@ export function platformSuite(
                 client.on("message", onMsg);
                 client.messages.send(me.userID, "platform-test");
             });
+        });
+
+        test("two-user DM", async () => {
+            const SK2 = Client.generateSecretKey();
+            const opts2: IClientOptions = {
+                inMemoryDb: true,
+                logLevel: "error",
+                dbLogLevel: "error",
+                adapters: makeAdapters(),
+                ...apiUrlOverrideFromEnv(),
+            };
+            const storage2 = makeStorage(SK2, opts2);
+            const client2 = await Client.create(SK2, opts2, storage2);
+            const username2 = Client.randomUsername();
+
+            try {
+                const [user2, regErr] = await client2.register(
+                    username2,
+                    "test-pw-2",
+                );
+                expect(regErr).toBeNull();
+
+                const loginErr = await client2.login(username2, "test-pw-2");
+                expect(loginErr).toBeFalsy();
+
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error("client2 connect timed out")),
+                        10_000,
+                    );
+                    client2.on("connected", () => {
+                        clearTimeout(timer);
+                        resolve();
+                    });
+                    client2.connect().catch((err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    });
+                });
+
+                // client sends to client2, client2 receives
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () =>
+                            reject(
+                                new Error(
+                                    `[${platformName}] two-user DM timed out`,
+                                ),
+                            ),
+                        15_000,
+                    );
+                    const onMsg = (msg: IMessage) => {
+                        if (msg.direction === "incoming" && msg.decrypted) {
+                            clearTimeout(timer);
+                            client2.off("message", onMsg);
+                            expect(msg.message).toBe("hello from user 1");
+                            resolve();
+                        }
+                    };
+                    client2.on("message", onMsg);
+                    client.messages.send(user2!.userID, "hello from user 1");
+                });
+            } finally {
+                await client2.close().catch(() => {});
+            }
         });
     });
 }
