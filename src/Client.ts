@@ -42,7 +42,8 @@ import type {
 } from "@vex-chat/types";
 import { MailType } from "@vex-chat/types";
 import ax, { AxiosError } from "axios";
-import { isBrowser, isNode } from "browser-or-node";
+// Detect Node.js — needed for manual cookie forwarding (browsers handle cookies automatically)
+const isNode = typeof process !== "undefined" && process.versions?.node != null;
 // btoa is native in browsers and Node 16+
 import pc from "picocolors";
 import { EventEmitter } from "eventemitter3";
@@ -1172,8 +1173,8 @@ export class Client extends EventEmitter {
                         host: this.getHost(),
                         dbPath: this.dbPath,
                         environment: {
-                            isBrowser,
                             isNode,
+                            platform: this.options?.deviceName ?? "unknown",
                         },
                         options,
                     },
