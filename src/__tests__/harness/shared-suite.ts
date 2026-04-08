@@ -290,5 +290,122 @@ export function platformSuite(
                 await client2.close().catch(() => {});
             }
         });
+
+        test("multi-device message sync", async () => {
+            // Device 2: same user, new device key (simulates second device)
+            const SK2 = Client.generateSecretKey();
+            const opts2: IClientOptions = {
+                inMemoryDb: true,
+                logLevel: "error",
+                dbLogLevel: "error",
+                adapters: makeAdapters(),
+                ...apiUrlOverrideFromEnv(),
+            };
+            const storage2 = makeStorage(SK2, opts2);
+            const device2 = await Client.create(SK2, opts2, storage2);
+
+            // Sender: separate user
+            const SK3 = Client.generateSecretKey();
+            const opts3: IClientOptions = {
+                inMemoryDb: true,
+                logLevel: "error",
+                dbLogLevel: "error",
+                adapters: makeAdapters(),
+                ...apiUrlOverrideFromEnv(),
+            };
+            const storage3 = makeStorage(SK3, opts3);
+            const sender = await Client.create(SK3, opts3, storage3);
+            const senderName = Client.randomUsername();
+
+            try {
+                // Register device2 under same account
+                await device2.login(username, password);
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error("device2 connect timed out")),
+                        10_000,
+                    );
+                    device2.on("connected", () => {
+                        clearTimeout(timer);
+                        resolve();
+                    });
+                    device2.connect().catch((err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    });
+                });
+
+                // Register + connect sender
+                await sender.register(senderName, "sender-pw");
+                await sender.login(senderName, "sender-pw");
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error("sender connect timed out")),
+                        10_000,
+                    );
+                    sender.on("connected", () => {
+                        clearTimeout(timer);
+                        resolve();
+                    });
+                    sender.connect().catch((err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    });
+                });
+
+                const targetUserID = client.me.user().userID;
+
+                // Both devices listen for the incoming DM
+                const received = { device1: false, device2: false };
+
+                const waitForBoth = new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () =>
+                            reject(
+                                new Error(
+                                    `multi-device sync timed out (d1=${received.device1}, d2=${received.device2})`,
+                                ),
+                            ),
+                        15_000,
+                    );
+                    const check = () => {
+                        if (received.device1 && received.device2) {
+                            clearTimeout(timer);
+                            resolve();
+                        }
+                    };
+
+                    client.on("message", (msg: IMessage) => {
+                        if (
+                            msg.direction === "incoming" &&
+                            msg.decrypted &&
+                            msg.message === "sync-test"
+                        ) {
+                            received.device1 = true;
+                            check();
+                        }
+                    });
+                    device2.on("message", (msg: IMessage) => {
+                        if (
+                            msg.direction === "incoming" &&
+                            msg.decrypted &&
+                            msg.message === "sync-test"
+                        ) {
+                            received.device2 = true;
+                            check();
+                        }
+                    });
+                });
+
+                sender.messages.send(targetUserID, "sync-test");
+                await waitForBoth;
+
+                expect(received.device1).toBe(true);
+                expect(received.device2).toBe(true);
+            } finally {
+                await device2.close().catch(() => {});
+                await sender.close().catch(() => {});
+            }
+        });
     });
 }
