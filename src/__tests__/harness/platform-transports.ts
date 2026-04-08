@@ -58,6 +58,7 @@ class NodeTestWS implements IWebSocketLike {
 
 class BrowserTestWS implements IWebSocketLike {
     private ws: WebSocket;
+    private messageListeners = new Map<Function, (...args: any[]) => void>();
     onerror: ((err: any) => void) | null = null;
 
     constructor(url: string, _options?: object) {
@@ -70,15 +71,23 @@ class BrowserTestWS implements IWebSocketLike {
     }
     on(event: string, listener: (...args: any[]) => void) {
         if (event === "message") {
-            this.ws.on("message", (data: Buffer) =>
-                listener(new Uint8Array(data)),
-            );
+            const wrapped = (data: Buffer) => listener(new Uint8Array(data));
+            this.messageListeners.set(listener, wrapped);
+            this.ws.on("message", wrapped);
         } else {
             this.ws.on(event, listener);
         }
     }
     off(event: string, listener: (...args: any[]) => void) {
-        this.ws.off(event, listener);
+        if (event === "message") {
+            const wrapped = this.messageListeners.get(listener);
+            if (wrapped) {
+                this.ws.off("message", wrapped);
+                this.messageListeners.delete(listener);
+            }
+        } else {
+            this.ws.off(event, listener);
+        }
     }
     send(data: any) {
         this.ws.send(data);

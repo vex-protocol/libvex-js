@@ -10,9 +10,9 @@ import type { IClientOptions } from "../index.js";
 platformSuite(
     "browser",
     browserTestAdapters,
-    (SK: string, _opts: IClientOptions) => {
+    async (SK: string, _opts: IClientOptions) => {
         const storage = new MemoryStorage(SK);
-        storage.init();
+        await storage.init();
         return storage;
     },
 );

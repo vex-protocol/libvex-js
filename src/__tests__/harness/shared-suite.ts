@@ -11,6 +11,51 @@ import type { IStorage } from "../../IStorage.js";
 import type { IClientAdapters } from "../../transport/types.js";
 import { testFile, testImage } from "./fixtures.js";
 
+async function connectAndWait(
+    c: Client,
+    label: string,
+    timeout = 10_000,
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`${label} connect timed out`)),
+            timeout,
+        );
+        const onConnected = () => {
+            clearTimeout(timer);
+            c.off("connected", onConnected);
+            resolve();
+        };
+        c.on("connected", onConnected);
+        c.connect().catch((err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+async function waitForMessage(
+    c: Client,
+    predicate: (m: IMessage) => boolean,
+    label: string,
+    timeout = 10_000,
+): Promise<IMessage> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`${label} message timed out`)),
+            timeout,
+        );
+        const onMsg = (msg: IMessage) => {
+            if (predicate(msg)) {
+                clearTimeout(timer);
+                c.off("message", onMsg);
+                resolve(msg);
+            }
+        };
+        c.on("message", onMsg);
+    });
+}
+
 function apiUrlOverrideFromEnv():
     | Pick<IClientOptions, "host" | "unsafeHttp">
     | undefined {
@@ -26,9 +71,12 @@ function apiUrlOverrideFromEnv():
 export function platformSuite(
     platformName: string,
     makeAdapters: () => IClientAdapters,
-    makeStorage: (SK: string, opts: IClientOptions) => IStorage,
+    makeStorage: (
+        SK: string,
+        opts: IClientOptions,
+    ) => IStorage | Promise<IStorage>,
 ) {
-    describe(`platform: ${platformName}`, () => {
+    describe.sequential(`platform: ${platformName}`, () => {
         let client: Client;
         const username = Client.randomUsername();
         const password = "platform-test-pw";
@@ -42,7 +90,7 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage = makeStorage(SK, opts);
+            const storage = await makeStorage(SK, opts);
             client = await Client.create(SK, opts, storage);
         });
 
@@ -64,45 +112,19 @@ export function platformSuite(
         });
 
         test("connect (websocket auth)", async () => {
-            await new Promise<void>((resolve, reject) => {
-                const timer = setTimeout(
-                    () =>
-                        reject(
-                            new Error(
-                                `[${platformName}] connect timed out — WS auth probably failed`,
-                            ),
-                        ),
-                    10_000,
-                );
-                client.on("connected", () => {
-                    clearTimeout(timer);
-                    resolve();
-                });
-                client.connect().catch((err) => {
-                    clearTimeout(timer);
-                    reject(err);
-                });
-            });
+            await connectAndWait(client, `[${platformName}] WS auth`);
         });
 
         test("send and receive DM (self)", async () => {
             const me = client.me.user();
-            await new Promise<void>((resolve, reject) => {
-                const timer = setTimeout(
-                    () => reject(new Error(`[${platformName}] DM timed out`)),
-                    10_000,
-                );
-                const onMsg = (msg: IMessage) => {
-                    if (msg.direction === "incoming" && msg.decrypted) {
-                        clearTimeout(timer);
-                        client.off("message", onMsg);
-                        expect(msg.message).toBe("platform-test");
-                        resolve();
-                    }
-                };
-                client.on("message", onMsg);
-                client.messages.send(me.userID, "platform-test");
-            });
+            const msgPromise = waitForMessage(
+                client,
+                (m) => m.direction === "incoming" && m.decrypted,
+                `[${platformName}] self-DM`,
+            );
+            client.messages.send(me.userID, "platform-test");
+            const msg = await msgPromise;
+            expect(msg.message).toBe("platform-test");
         });
 
         test("two-user DM", async () => {
@@ -114,7 +136,7 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage2 = makeStorage(SK2, opts2);
+            const storage2 = await makeStorage(SK2, opts2);
             const client2 = await Client.create(SK2, opts2, storage2);
             const username2 = Client.randomUsername();
 
@@ -128,43 +150,18 @@ export function platformSuite(
                 const loginErr = await client2.login(username2, "test-pw-2");
                 expect(loginErr).toBeFalsy();
 
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () => reject(new Error("client2 connect timed out")),
-                        10_000,
-                    );
-                    client2.on("connected", () => {
-                        clearTimeout(timer);
-                        resolve();
-                    });
-                    client2.connect().catch((err) => {
-                        clearTimeout(timer);
-                        reject(err);
-                    });
-                });
+                await connectAndWait(client2, "client2");
 
                 // client sends to client2, client2 receives
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () =>
-                            reject(
-                                new Error(
-                                    `[${platformName}] two-user DM timed out`,
-                                ),
-                            ),
-                        15_000,
-                    );
-                    const onMsg = (msg: IMessage) => {
-                        if (msg.direction === "incoming" && msg.decrypted) {
-                            clearTimeout(timer);
-                            client2.off("message", onMsg);
-                            expect(msg.message).toBe("hello from user 1");
-                            resolve();
-                        }
-                    };
-                    client2.on("message", onMsg);
-                    client.messages.send(user2!.userID, "hello from user 1");
-                });
+                const msgPromise = waitForMessage(
+                    client2,
+                    (m) => m.direction === "incoming" && m.decrypted,
+                    `[${platformName}] two-user DM`,
+                    15_000,
+                );
+                client.messages.send(user2!.userID, "hello from user 1");
+                const msg = await msgPromise;
+                expect(msg.message).toBe("hello from user 1");
             } finally {
                 await client2.close().catch(() => {});
             }
@@ -179,7 +176,7 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage2 = makeStorage(SK2, opts2);
+            const storage2 = await makeStorage(SK2, opts2);
             const client2 = await Client.create(SK2, opts2, storage2);
             const username2 = Client.randomUsername();
 
@@ -187,20 +184,7 @@ export function platformSuite(
                 // Register + login + connect user2
                 await client2.register(username2, "test-pw-2");
                 await client2.login(username2, "test-pw-2");
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () => reject(new Error("client2 connect timed out")),
-                        10_000,
-                    );
-                    client2.on("connected", () => {
-                        clearTimeout(timer);
-                        resolve();
-                    });
-                    client2.connect().catch((err) => {
-                        clearTimeout(timer);
-                        reject(err);
-                    });
-                });
+                await connectAndWait(client2, "client2");
 
                 // user1 creates server + channel
                 const server = await client.servers.create("test-server");
@@ -220,29 +204,18 @@ export function platformSuite(
                 await client2.invites.redeem(invite.inviteID);
 
                 // user1 sends group message, user2 receives it
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () =>
-                            reject(
-                                new Error("group message receive timed out"),
-                            ),
-                        15_000,
-                    );
-                    const onMsg = (msg: IMessage) => {
-                        if (
-                            msg.direction === "incoming" &&
-                            msg.decrypted &&
-                            msg.group === channel.channelID
-                        ) {
-                            clearTimeout(timer);
-                            client2.off("message", onMsg);
-                            expect(msg.message).toBe("hello channel");
-                            resolve();
-                        }
-                    };
-                    client2.on("message", onMsg);
-                    client.messages.group(channel.channelID, "hello channel");
-                });
+                const msgPromise = waitForMessage(
+                    client2,
+                    (m) =>
+                        m.direction === "incoming" &&
+                        m.decrypted &&
+                        m.group === channel.channelID,
+                    "group message receive",
+                    15_000,
+                );
+                client.messages.group(channel.channelID, "hello channel");
+                const msg = await msgPromise;
+                expect(msg.message).toBe("hello channel");
 
                 // Cleanup
                 await client.servers.delete(server.serverID);
@@ -263,27 +236,14 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage2 = makeStorage(deviceKey, opts2);
+            const storage2 = await makeStorage(deviceKey, opts2);
             const client2 = await Client.create(deviceKey, opts2, storage2);
 
             try {
                 const authErr = await client2.loginWithDeviceKey(deviceID);
                 expect(authErr).toBeNull();
 
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () => reject(new Error("device-key connect timed out")),
-                        10_000,
-                    );
-                    client2.on("connected", () => {
-                        clearTimeout(timer);
-                        resolve();
-                    });
-                    client2.connect().catch((err) => {
-                        clearTimeout(timer);
-                        reject(err);
-                    });
-                });
+                await connectAndWait(client2, "device-key");
 
                 // Same user, same identity
                 expect(client2.me.user().userID).toBe(client.me.user().userID);
@@ -348,21 +308,13 @@ export function platformSuite(
             const me = client.me.user();
 
             // Send a message and wait for it
-            await new Promise<void>((resolve, reject) => {
-                const timer = setTimeout(
-                    () => reject(new Error("history DM timed out")),
-                    10_000,
-                );
-                const onMsg = (msg: IMessage) => {
-                    if (msg.direction === "incoming" && msg.decrypted) {
-                        clearTimeout(timer);
-                        client.off("message", onMsg);
-                        resolve();
-                    }
-                };
-                client.on("message", onMsg);
-                client.messages.send(me.userID, "history-test");
-            });
+            const msgPromise = waitForMessage(
+                client,
+                (m) => m.direction === "incoming" && m.decrypted,
+                "history DM",
+            );
+            client.messages.send(me.userID, "history-test");
+            await msgPromise;
 
             const history = await client.messages.retrieve(me.userID);
             expect(history.length).toBeGreaterThan(0);
@@ -384,7 +336,7 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage2 = makeStorage(SK2, opts2);
+            const storage2 = await makeStorage(SK2, opts2);
             const device2 = await Client.create(SK2, opts2, storage2);
 
             // Sender: separate user
@@ -396,45 +348,19 @@ export function platformSuite(
                 adapters: makeAdapters(),
                 ...apiUrlOverrideFromEnv(),
             };
-            const storage3 = makeStorage(SK3, opts3);
+            const storage3 = await makeStorage(SK3, opts3);
             const sender = await Client.create(SK3, opts3, storage3);
             const senderName = Client.randomUsername();
 
             try {
                 // Register device2 under same account
                 await device2.login(username, password);
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () => reject(new Error("device2 connect timed out")),
-                        10_000,
-                    );
-                    device2.on("connected", () => {
-                        clearTimeout(timer);
-                        resolve();
-                    });
-                    device2.connect().catch((err) => {
-                        clearTimeout(timer);
-                        reject(err);
-                    });
-                });
+                await connectAndWait(device2, "device2");
 
                 // Register + connect sender
                 await sender.register(senderName, "sender-pw");
                 await sender.login(senderName, "sender-pw");
-                await new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(
-                        () => reject(new Error("sender connect timed out")),
-                        10_000,
-                    );
-                    sender.on("connected", () => {
-                        clearTimeout(timer);
-                        resolve();
-                    });
-                    sender.connect().catch((err) => {
-                        clearTimeout(timer);
-                        reject(err);
-                    });
-                });
+                await connectAndWait(sender, "sender");
 
                 const targetUserID = client.me.user().userID;
 
