@@ -474,6 +474,8 @@ export interface IClientOptions {
     saveHistory?: boolean;
     /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
     adapters?: IClientAdapters;
+    /** Platform label for device registration (e.g. "ios", "macos", "linux"). */
+    deviceName?: string;
 }
 
 // tslint:disable-next-line: interface-name
@@ -1101,12 +1103,15 @@ export class Client extends EventEmitter {
         | { HTTP: "http://"; WS: "ws://" }
         | { HTTP: "https://"; WS: "wss://" };
 
+    private options?: IClientOptions;
+
     private constructor(
         privateKey?: string,
         options?: IClientOptions,
         storage?: IStorage,
     ) {
         super();
+        this.options = options;
 
         this.log = options?.adapters?.logger ?? {
             info() {},
@@ -1451,10 +1456,7 @@ export class Client extends EventEmitter {
                 ),
                 preKeyIndex: this.xKeyRing.preKeys.index!,
                 password,
-                deviceName:
-                    typeof navigator !== "undefined" && navigator.userAgent
-                        ? navigator.userAgent.slice(0, 64)
-                        : "unknown",
+                deviceName: this.options?.deviceName ?? "unknown",
             };
             try {
                 const res = await ax.post(
@@ -1684,10 +1686,7 @@ export class Client extends EventEmitter {
             preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
             preKeySignature: XUtils.encodeHex(this.xKeyRing.preKeys.signature),
             preKeyIndex: this.xKeyRing.preKeys.index!,
-            deviceName:
-                typeof navigator !== "undefined"
-                    ? navigator.userAgent.slice(0, 64)
-                    : "node",
+            deviceName: this.options?.deviceName ?? "unknown",
         };
 
         try {

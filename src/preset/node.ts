@@ -17,6 +17,7 @@ export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
     const logger: ILogger = createLogger("libvex", logLevel);
 
     return {
+        deviceName: process.platform,
         adapters: {
             logger,
             WebSocket: WebSocket as any,

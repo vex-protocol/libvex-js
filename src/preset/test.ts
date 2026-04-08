@@ -24,6 +24,7 @@ const logger: ILogger = {
 
 export function testPreset(WebSocket: IWebSocketCtor): PlatformPreset {
     return {
+        deviceName: "test",
         adapters: {
             logger,
             WebSocket,

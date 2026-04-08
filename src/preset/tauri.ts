@@ -26,6 +26,7 @@ const logger: ILogger = {
 
 export function tauriPreset(): PlatformPreset {
     return {
+        deviceName: navigator.platform,
         adapters: {
             logger,
             WebSocket: BrowserWebSocket as any,

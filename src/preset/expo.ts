@@ -7,6 +7,7 @@
  *
  * expo-sqlite and kysely-expo are optional peerDependencies.
  */
+import { Platform } from "react-native";
 import { BrowserWebSocket } from "../transport/browser.js";
 import type { PlatformPreset } from "./types.js";
 import type { ILogger } from "../transport/types.js";
@@ -28,6 +29,7 @@ const logger: ILogger = {
 
 export function expoPreset(): PlatformPreset {
     return {
+        deviceName: Platform.OS,
         adapters: {
             logger,
             WebSocket: BrowserWebSocket as any,
