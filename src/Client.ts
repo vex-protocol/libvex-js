@@ -577,8 +577,8 @@ export interface ISessions {
  * - `lastSeen`
  */
 export interface IUser {
-    /** Last-seen timestamp (unix epoch milliseconds). */
-    lastSeen: number;
+    /** Last-seen timestamp. */
+    lastSeen: Date;
     /** User identifier. */
     userID: string;
     /** Public username. */
