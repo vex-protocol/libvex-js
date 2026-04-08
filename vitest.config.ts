@@ -6,6 +6,14 @@ export default defineConfig({
         projects: [
             {
                 test: {
+                    name: "unit",
+                    globals: true,
+                    include: ["src/__tests__/codec.test.ts"],
+                    testTimeout: 10_000,
+                },
+            },
+            {
+                test: {
                     name: "node",
                     globals: true,
                     include: ["src/__tests__/platform-node.test.ts"],
