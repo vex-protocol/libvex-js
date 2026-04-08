@@ -291,6 +291,85 @@ export function platformSuite(
             }
         });
 
+        test("server CRUD", async () => {
+            const permissions = await client.permissions.retrieve();
+            expect(permissions).toEqual([]);
+
+            const server = await client.servers.create("Test Server");
+            const serverList = await client.servers.retrieve();
+            expect(serverList.some((s) => s.serverID === server.serverID)).toBe(
+                true,
+            );
+
+            const byID = await client.servers.retrieveByID(server.serverID);
+            expect(byID?.serverID).toBe(server.serverID);
+
+            await client.servers.delete(server.serverID);
+            const afterDelete = await client.servers.retrieve();
+            expect(
+                afterDelete.some((s) => s.serverID === server.serverID),
+            ).toBe(false);
+        });
+
+        test("channel CRUD", async () => {
+            const server = await client.servers.create("Channel Test Server");
+            const channel = await client.channels.create(
+                "Test Channel",
+                server.serverID,
+            );
+
+            const byID = await client.channels.retrieveByID(channel.channelID);
+            expect(byID?.channelID).toBe(channel.channelID);
+
+            await client.channels.delete(channel.channelID);
+            const channels = await client.channels.retrieve(server.serverID);
+            expect(
+                channels.some((c) => c.channelID === channel.channelID),
+            ).toBe(false);
+            // Default channel still exists
+            expect(channels.length).toBe(1);
+
+            await client.servers.delete(server.serverID);
+        });
+
+        test("invite create + redeem", async () => {
+            const server = await client.servers.create("Invite Test Server");
+            const invite = await client.invites.create(server.serverID, "1h");
+            expect(invite).toBeTruthy();
+            expect(invite.serverID).toBe(server.serverID);
+
+            await client.invites.redeem(invite.inviteID);
+            await client.servers.delete(server.serverID);
+        });
+
+        test("message history retrieve + delete", async () => {
+            const me = client.me.user();
+
+            // Send a message and wait for it
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(
+                    () => reject(new Error("history DM timed out")),
+                    10_000,
+                );
+                const onMsg = (msg: IMessage) => {
+                    if (msg.direction === "incoming" && msg.decrypted) {
+                        clearTimeout(timer);
+                        client.off("message", onMsg);
+                        resolve();
+                    }
+                };
+                client.on("message", onMsg);
+                client.messages.send(me.userID, "history-test");
+            });
+
+            const history = await client.messages.retrieve(me.userID);
+            expect(history.length).toBeGreaterThan(0);
+
+            await client.messages.delete(me.userID);
+            const afterDelete = await client.messages.retrieve(me.userID);
+            expect(afterDelete.length).toBe(0);
+        });
+
         test("multi-device message sync", async () => {
             // Device 2: same user, new device key (simulates second device)
             const SK2 = Client.generateSecretKey();
