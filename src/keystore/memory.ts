@@ -2,7 +2,7 @@
  * In-memory KeyStore for testing and ephemeral sessions.
  * No persistence — credentials are lost when the process exits.
  */
-import type { KeyStore, StoredCredentials } from "@vex-chat/types";
+import type { KeyStore, StoredCredentials } from "../types/index.js";
 
 export class MemoryKeyStore implements KeyStore {
     private readonly store = new Map<string, StoredCredentials>();

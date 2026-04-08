@@ -1,9 +1,5 @@
-import type {
-    IDevice,
-    IPreKeysCrypto,
-    IPreKeysSQL,
-    ISessionCrypto,
-} from "@vex-chat/types";
+import type { IDevice, IPreKeysSQL } from "@vex-chat/types";
+import type { IPreKeysCrypto, ISessionCrypto } from "./types/index.js";
 import type { EventEmitter } from "eventemitter3";
 
 import type { IMessage, ISession } from "./index.js";

@@ -14,7 +14,6 @@ import type {
     IMailWS,
     INotifyMsg,
     IPermission,
-    IPreKeysCrypto,
     IPreKeysSQL,
     IPreKeysWS,
     IReceiptMsg,
@@ -22,11 +21,14 @@ import type {
     IResourceMsg,
     IRespMsg,
     IServer,
-    ISessionCrypto,
     ISessionSQL,
     ISuccessMsg,
-    IXKeyRing,
 } from "@vex-chat/types";
+import type {
+    IPreKeysCrypto,
+    ISessionCrypto,
+    IXKeyRing,
+} from "./types/index.js";
 import type { AxiosInstance } from "axios";
 
 import { sleep } from "@extrahash/sleep";

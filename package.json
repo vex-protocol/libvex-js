@@ -1,6 +1,6 @@
 {
     "name": "@vex-chat/libvex",
-    "version": "1.1.0",
+    "version": "1.2.0-rc.0",
     "description": "Library for communicating with xchat server.",
     "type": "module",
     "sideEffects": false,
@@ -115,7 +115,7 @@
     "dependencies": {
         "@extrahash/sleep": "^1.0.0",
         "@vex-chat/crypto": "^1.1.1",
-        "@vex-chat/types": "^1.0.1",
+        "@vex-chat/types": "^1.1.0-rc.6",
         "axios": "^1.7.0",
         "eventemitter3": "^5.0.4",
         "kysely": "^0.28.15",

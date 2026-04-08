@@ -1,4 +1,4 @@
-import type { KeyStore, StoredCredentials } from "@vex-chat/types";
+import type { KeyStore, StoredCredentials } from "../types/index.js";
 
 /**
  * File-backed KeyStore for Node.js (CLI tools, bots, integration tests).

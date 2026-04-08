@@ -34,5 +34,6 @@ export type {
     IWebSocketCtor,
     IWebSocketLike,
 } from "./transport/types.js";
-// Re-export app-facing types from @vex-chat/types so apps only depend on libvex
-export type { IInvite, KeyStore, StoredCredentials } from "@vex-chat/types";
+// Re-export app-facing types
+export type { IInvite } from "@vex-chat/types";
+export type { KeyStore, StoredCredentials } from "./types/index.js";

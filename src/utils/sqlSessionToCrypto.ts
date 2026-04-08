@@ -1,4 +1,5 @@
-import type { ISessionCrypto, ISessionSQL } from "@vex-chat/types";
+import type { ISessionSQL } from "@vex-chat/types";
+import type { ISessionCrypto } from "../types/index.js";
 
 import { XUtils } from "@vex-chat/crypto";
 

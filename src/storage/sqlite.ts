@@ -1,10 +1,5 @@
-import type {
-    IDevice,
-    IPreKeysCrypto,
-    IPreKeysSQL,
-    ISessionCrypto,
-    ISessionSQL,
-} from "@vex-chat/types";
+import type { IDevice, IPreKeysSQL, ISessionSQL } from "@vex-chat/types";
+import type { IPreKeysCrypto, ISessionCrypto } from "../types/index.js";
 import type { Kysely } from "kysely";
 
 /**
