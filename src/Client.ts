@@ -47,27 +47,9 @@ import {
 import { MailType } from "@vex-chat/types";
 import axios, { type AxiosError } from "axios";
 import { EventEmitter } from "eventemitter3";
-import { Packr } from "msgpackr";
 import pc from "picocolors";
-// useRecords:false emits standard msgpack (no nonstandard record extension).
-// moreTypes:false keeps the extension set to what every other decoder understands.
-const _packr = new Packr({ moreTypes: false, useRecords: false });
-// Packr.encode() returns a subarray of its internal pool buffer.
-// In browsers, XMLHttpRequest.send() sends the full underlying ArrayBuffer,
-// not just the slice — corrupting the payload (axios issue #4068).
-// Wrap encode to always return a fresh copy.
-const msgpack = {
-    decode: _packr.decode.bind(_packr),
-    encode: (value: any): Uint8Array => {
-        const packed = _packr.encode(value);
-        return new Uint8Array(
-            packed.buffer.slice(
-                packed.byteOffset,
-                packed.byteOffset + packed.byteLength,
-            ),
-        );
-    },
-};
+
+import { msgpack } from "./codec.js";
 import objectHash from "object-hash";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";

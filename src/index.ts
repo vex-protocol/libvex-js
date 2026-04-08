@@ -1,4 +1,5 @@
 export { Client } from "./Client.js";
+export { createCodec, msgpack } from "./codec.js";
 export type {
     IChannel,
     IChannels,
