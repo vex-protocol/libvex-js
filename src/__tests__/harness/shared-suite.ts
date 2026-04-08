@@ -169,6 +169,87 @@ export function platformSuite(
             }
         });
 
+        test("group messaging in channel", async () => {
+            const SK2 = Client.generateSecretKey();
+            const opts2: IClientOptions = {
+                inMemoryDb: true,
+                logLevel: "error",
+                dbLogLevel: "error",
+                adapters: makeAdapters(),
+                ...apiUrlOverrideFromEnv(),
+            };
+            const storage2 = makeStorage(SK2, opts2);
+            const client2 = await Client.create(SK2, opts2, storage2);
+            const username2 = Client.randomUsername();
+
+            try {
+                // Register + login + connect user2
+                await client2.register(username2, "test-pw-2");
+                await client2.login(username2, "test-pw-2");
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () => reject(new Error("client2 connect timed out")),
+                        10_000,
+                    );
+                    client2.on("connected", () => {
+                        clearTimeout(timer);
+                        resolve();
+                    });
+                    client2.connect().catch((err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    });
+                });
+
+                // user1 creates server + channel
+                const server = await client.servers.create("test-server");
+                expect(server).toBeTruthy();
+                const channels = await client.channels.retrieve(
+                    server.serverID,
+                );
+                expect(channels.length).toBeGreaterThan(0);
+                const channel = channels[0]!;
+
+                // user1 creates invite, user2 redeems it
+                const invite = await client.invites.create(
+                    server.serverID,
+                    "1h",
+                );
+                expect(invite).toBeTruthy();
+                await client2.invites.redeem(invite.inviteID);
+
+                // user1 sends group message, user2 receives it
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(
+                        () =>
+                            reject(
+                                new Error("group message receive timed out"),
+                            ),
+                        15_000,
+                    );
+                    const onMsg = (msg: IMessage) => {
+                        if (
+                            msg.direction === "incoming" &&
+                            msg.decrypted &&
+                            msg.group === channel.channelID
+                        ) {
+                            clearTimeout(timer);
+                            client2.off("message", onMsg);
+                            expect(msg.message).toBe("hello channel");
+                            resolve();
+                        }
+                    };
+                    client2.on("message", onMsg);
+                    client.messages.group(channel.channelID, "hello channel");
+                });
+
+                // Cleanup
+                await client.servers.delete(server.serverID);
+            } finally {
+                await client2.close().catch(() => {});
+            }
+        });
+
         test("loginWithDeviceKey (auto-login)", async () => {
             // Simulate app restart: create a new Client with the same
             // device key, authenticate without password.
