@@ -78,9 +78,8 @@
         "prepare": "husky",
         "prepack": "npm run build",
         "docs": "npx typedoc --options typedoc.json",
-        "test": "vitest run --silent",
-        "test:node": "vitest run -c vitest.config.node.ts",
-        "test:browser": "vitest run -c vitest.config.browser.ts",
+        "test": "vitest run --project unit --silent",
+        "test:e2e": "vitest run --project node --project browser --silent",
         "license:check": "npx @onebeyond/license-checker scan --allowOnly MIT ISC BSD-2-Clause BSD-3-Clause Apache-2.0 0BSD MPL-2.0 CC0-1.0 CC-BY-4.0 Unlicense BlueOak-1.0.0 Python-2.0 Zlib PSF-2.0 Artistic-2.0 AGPL-3.0-or-later WTFPL --ignoreRootPackageLicense --disableReport"
     },
     "devDependencies": {
