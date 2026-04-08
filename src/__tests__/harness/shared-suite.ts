@@ -255,6 +255,7 @@ export function platformSuite(
             // Simulate app restart: create a new Client with the same
             // device key, authenticate without password.
             const deviceKey = client.getKeys().private;
+            const deviceID = client.me.device().deviceID;
             const opts2: IClientOptions = {
                 inMemoryDb: true,
                 logLevel: "error",
@@ -266,7 +267,7 @@ export function platformSuite(
             const client2 = await Client.create(deviceKey, opts2, storage2);
 
             try {
-                const authErr = await client2.loginWithDeviceKey();
+                const authErr = await client2.loginWithDeviceKey(deviceID);
                 expect(authErr).toBeNull();
 
                 await new Promise<void>((resolve, reject) => {

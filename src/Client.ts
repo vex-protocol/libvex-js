@@ -1266,14 +1266,18 @@ export class Client extends EventEmitter {
      * Used by auto-login when stored credentials have a deviceKey
      * but no valid session.
      */
-    public async loginWithDeviceKey(): Promise<Error | null> {
+    public async loginWithDeviceKey(deviceID?: string): Promise<Error | null> {
         try {
+            const id = deviceID ?? this.device?.deviceID;
+            if (!id) {
+                return new Error("No deviceID — pass it or connect first.");
+            }
             const signKeyHex = XUtils.encodeHex(this.signKeys.publicKey);
 
             const challengeRes = await this.ax.post(
                 this.getHost() + "/auth/device",
                 msgpack.encode({
-                    deviceID: this.device?.deviceID,
+                    deviceID: id,
                     signKey: signKeyHex,
                 }),
                 { headers: { "Content-Type": "application/msgpack" } },
