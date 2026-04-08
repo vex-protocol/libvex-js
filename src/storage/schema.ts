@@ -1,8 +1,5 @@
 /**
  * Kysely typed table interfaces for the client-side SQLite database.
- *
- * These mirror the schema previously created by knex / raw SQL in the
- * three platform-specific storage implementations (Node, Tauri, Expo).
  */
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 

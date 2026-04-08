@@ -174,11 +174,9 @@ export class SqliteStorage extends EventEmitter implements IStorage {
                 })
                 .execute();
         } catch (err: any) {
-            // SQLite UNIQUE constraint violation
+            if (this.closing) return;
             if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
-                this.log.warn(
-                    "Attempted to insert duplicate nonce into message table.",
-                );
+                this.log.warn("Duplicate nonce in message table.");
             } else {
                 throw err;
             }

@@ -10,6 +10,7 @@ import type { IStorage } from "../IStorage.js";
  */
 export interface PlatformPreset {
     adapters: IClientAdapters;
+    deviceName: string;
     createStorage(
         dbName: string,
         privateKey: string,

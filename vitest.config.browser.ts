@@ -7,6 +7,7 @@ export default defineConfig({
         globals: true,
         include: ["src/__tests__/platform-browser.test.ts"],
         testTimeout: 15000,
+        hookTimeout: 30_000,
         fileParallelism: false,
     },
 });
