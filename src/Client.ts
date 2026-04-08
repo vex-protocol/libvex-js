@@ -43,7 +43,6 @@ import type {
 import { MailType } from "@vex-chat/types";
 import axios, { AxiosError } from "axios";
 import type { AxiosInstance } from "axios";
-// btoa is native in browsers and Node 16+
 import pc from "picocolors";
 import { EventEmitter } from "eventemitter3";
 import { Packr } from "msgpackr";
@@ -75,9 +74,7 @@ import type {
     IWebSocketLike,
 } from "./transport/types.js";
 import type { IStorage } from "./IStorage.js";
-// Storage (Kysely/better-sqlite3) loaded lazily — only when no external storage is provided.
 import { capitalize } from "./utils/capitalize.js";
-// createLogger (winston) loaded lazily — only in Node when no adapter logger is provided.
 
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
@@ -167,14 +164,6 @@ export interface IUser {
     /** Public username. */
     username: string;
 }
-
-/**
- * Internal alias kept for implementation readability.
- *
- * @internal
- * @hidden
- */
-interface ICensoredUser extends IUser {}
 
 /**
  * ISession is an end to end encryption session with another peer.
@@ -1270,7 +1259,7 @@ export class Client extends EventEmitter {
     }
 
     /**
-     * Authenticates using the device's Ed25519 signing key (ADR-007).
+     * Authenticates using the device's Ed25519 signing key.
      * No password needed — proves possession of the private key via
      * challenge-response. Issues a short-lived (1-hour) JWT.
      *
@@ -1281,7 +1270,6 @@ export class Client extends EventEmitter {
         try {
             const signKeyHex = XUtils.encodeHex(this.signKeys.publicKey);
 
-            // Step 1: Request challenge
             const challengeRes = await this.ax.post(
                 this.getHost() + "/auth/device",
                 msgpack.encode({
@@ -1292,12 +1280,10 @@ export class Client extends EventEmitter {
             );
             const { challengeID, challenge } = challengeRes.data;
 
-            // Step 2: Sign the challenge nonce with our private key
             const signed = XUtils.encodeHex(
                 nacl.sign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
             );
 
-            // Step 3: Verify — server checks signature, issues JWT
             const verifyRes = await this.ax.post(
                 this.getHost() + "/auth/device/verify",
                 msgpack.encode({ challengeID, signed }),
@@ -1492,7 +1478,6 @@ export class Client extends EventEmitter {
         const res = await this.ax.get(
             this.getHost() + "/emoji/" + emojiID + "/details",
         );
-        // this is actually empty string
         if (!res.data) {
             return null;
         }
@@ -3018,10 +3003,7 @@ export class Client extends EventEmitter {
             }
 
             const wsUrl = this.prefixes.WS + this.host + "/socket";
-            // Connect with no credentials in URL or headers (ADR-006).
-            // Auth happens post-connection: we send the JWT as the first
-            // message after open. This works on all platforms including
-            // React Native (which cannot send cookies on the HTTP upgrade).
+            // Auth sent as first message after open
             this.conn = new this.adapters.WebSocket(wsUrl);
             this.conn.on("open", () => {
                 this.log.info("Connection opened.");

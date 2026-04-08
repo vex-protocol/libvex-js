@@ -1,10 +1,6 @@
 /**
  * Platform-simulating WebSocket constructors for integration tests.
- *
- * With post-connection auth (ADR-006) and Bearer tokens (ADR-008),
- * all platforms connect bare — no cookies or headers on upgrade.
- * The only difference is binary handling: Node ws delivers Buffer,
- * browsers/RN deliver ArrayBuffer → Uint8Array.
+ * Node delivers Buffer; browsers/RN deliver Uint8Array.
  */
 
 import WebSocket from "ws";
