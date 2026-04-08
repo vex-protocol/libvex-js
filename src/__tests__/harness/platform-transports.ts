@@ -104,8 +104,3 @@ export function nodeTestAdapters(): IClientAdapters {
 export function browserTestAdapters(): IClientAdapters {
     return { logger: testLogger, WebSocket: BrowserTestWS as any };
 }
-
-// RN behaves the same as browser for WebSocket (ADR-006 post-connection auth)
-export function rnTestAdapters(): IClientAdapters {
-    return { logger: testLogger, WebSocket: BrowserTestWS as any };
-}

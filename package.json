@@ -76,8 +76,7 @@
         "test": "vitest run",
         "test:node": "vitest run -c vitest.config.node.ts",
         "test:browser": "vitest run -c vitest.config.browser.ts",
-        "test:rn": "vitest run -c vitest.config.rn.ts",
-        "test:platforms": "vitest run -c vitest.config.node.ts && vitest run -c vitest.config.browser.ts && vitest run -c vitest.config.rn.ts"
+        "test:platforms": "vitest run -c vitest.config.node.ts && vitest run -c vitest.config.browser.ts"
     },
     "devDependencies": {
         "@tauri-apps/plugin-sql": "^2.4.0",
