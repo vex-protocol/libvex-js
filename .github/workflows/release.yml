@@ -1,0 +1,61 @@
+name: Release
+
+on:
+    push:
+        branches: [master]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+    contents: read
+
+jobs:
+    release:
+        name: Release
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+            id-token: write
+        env:
+            npm_config_save_exact: "true"
+            npm_config_engine_strict: "true"
+        steps:
+            - name: Harden Runner
+              uses: step-security/harden-runner@v2
+              with:
+                  egress-policy: audit
+
+            - uses: actions/checkout@v4
+
+            - name: Install mise
+              uses: jdx/mise-action@v3.5.1
+
+            - name: Install dependencies
+              run: npm ci --ignore-scripts
+
+            - name: Build
+              run: npm run build
+
+            - name: Check dependency licenses
+              run: npm run license:check
+
+            - name: Create Release PR or Publish
+              id: changesets
+              uses: changesets/action@v1
+              with:
+                  publish: npx changeset publish --provenance --access public
+                  title: "chore: version packages"
+                  commit: "chore: version packages"
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Generate SBOM
+              if: steps.changesets.outputs.published == 'true'
+              run: npx @cyclonedx/cyclonedx-npm --output-file sbom.json
+
+            - uses: actions/upload-artifact@v4
+              if: steps.changesets.outputs.published == 'true'
+              with:
+                  name: sbom-${{ github.sha }}
+                  path: sbom.json

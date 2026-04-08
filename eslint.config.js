@@ -1,15 +1,29 @@
-import ts from "@typescript-eslint/eslint-plugin";
-import parser from "@typescript-eslint/parser";
+import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
-export default [
+export default tseslint.config(
+    ...tseslint.configs.strictTypeChecked,
     {
-        files: ["src/**/*.ts"],
-        languageOptions: { parser },
-        plugins: { "@typescript-eslint": ts },
+        languageOptions: {
+            parserOptions: {
+                projectService: true,
+                tsconfigRootDir: import.meta.dirname,
+            },
+        },
         rules: {
-            "@typescript-eslint/no-explicit-any": "off",
+            "@typescript-eslint/no-unsafe-type-assertion": "error",
+            "@typescript-eslint/consistent-type-imports": [
+                "error",
+                {
+                    prefer: "type-imports",
+                    fixStyle: "inline-type-imports",
+                },
+            ],
+            "@typescript-eslint/consistent-type-exports": "error",
+            "@typescript-eslint/no-import-type-side-effects": "error",
+            "@typescript-eslint/prefer-readonly": "error",
+            "@typescript-eslint/require-array-sort-compare": "error",
         },
     },
     eslintConfigPrettier,
-];
+);
