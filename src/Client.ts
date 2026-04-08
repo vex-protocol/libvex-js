@@ -24,7 +24,7 @@ import type {
     IServer,
     ISessionCrypto,
     ISessionSQL,
-    ISucessMsg,
+    ISuccessMsg,
     IXKeyRing,
 } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
@@ -1732,7 +1732,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISucessMsg).data);
+                        res((receivedMsg as ISuccessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
@@ -3055,7 +3055,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISucessMsg).data);
+                        res((receivedMsg as ISuccessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
