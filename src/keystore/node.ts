@@ -1,3 +1,5 @@
+import type { KeyStore, StoredCredentials } from "@vex-chat/types";
+
 /**
  * File-backed KeyStore for Node.js (CLI tools, bots, integration tests).
  *
@@ -7,20 +9,23 @@
 import { XUtils } from "@vex-chat/crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { KeyStore, StoredCredentials } from "@vex-chat/types";
 
 export class NodeKeyStore implements KeyStore {
-    private dir: string;
+    private readonly dir: string;
 
     constructor(dir: string = ".") {
         this.dir = dir;
     }
 
-    private filePath(username: string): string {
-        return path.join(this.dir, `${username}.vex`);
+    async clear(username: string): Promise<void> {
+        try {
+            fs.unlinkSync(this.filePath(username));
+        } catch {
+            // File may not exist
+        }
     }
 
-    async load(username?: string): Promise<StoredCredentials | null> {
+    async load(username?: string): Promise<null | StoredCredentials> {
         if (username) {
             return this.readFile(this.filePath(username));
         }
@@ -30,12 +35,12 @@ export class NodeKeyStore implements KeyStore {
                 .readdirSync(this.dir)
                 .filter((f) => f.endsWith(".vex"))
                 .map((f) => ({
-                    name: f,
                     mtime: fs.statSync(path.join(this.dir, f)).mtimeMs,
+                    name: f,
                 }))
                 .sort((a, b) => b.mtime - a.mtime);
             if (files.length === 0) return null;
-            return this.readFile(path.join(this.dir, files[0]!.name));
+            return this.readFile(path.join(this.dir, files[0].name));
         } catch {
             return null;
         }
@@ -47,15 +52,11 @@ export class NodeKeyStore implements KeyStore {
         fs.writeFileSync(this.filePath(creds.username), encrypted);
     }
 
-    async clear(username: string): Promise<void> {
-        try {
-            fs.unlinkSync(this.filePath(username));
-        } catch {
-            // File may not exist
-        }
+    private filePath(username: string): string {
+        return path.join(this.dir, `${username}.vex`);
     }
 
-    private readFile(filePath: string): StoredCredentials | null {
+    private readFile(filePath: string): null | StoredCredentials {
         try {
             const data = fs.readFileSync(filePath);
             const decrypted = XUtils.decryptKeyData(new Uint8Array(data), "");

@@ -1,15 +1,15 @@
 export { Client } from "./Client.js";
 export type {
-    IChannels,
     IChannel,
+    IChannels,
     IClientOptions,
+    IDevice,
     IDevices,
     IEmojis,
-    IDevice,
     IFile,
-    IFiles,
     IFileProgress,
     IFileRes,
+    IFiles,
     IInvites,
     IKeys,
     IMe,
@@ -18,21 +18,21 @@ export type {
     IModeration,
     IPermission,
     IPermissions,
-    IServers,
     IServer,
-    ISessions,
+    IServers,
     ISession,
+    ISessions,
     IUser,
     IUsers,
 } from "./Client.js";
 export type { IStorage } from "./IStorage.js";
 
-// Re-export app-facing types from @vex-chat/types so apps only depend on libvex
-export type { KeyStore, StoredCredentials, IInvite } from "@vex-chat/types";
+export type { PlatformPreset } from "./preset/types.js";
 export type {
     IClientAdapters,
     ILogger,
     IWebSocketCtor,
     IWebSocketLike,
 } from "./transport/types.js";
-export type { PlatformPreset } from "./preset/types.js";
+// Re-export app-facing types from @vex-chat/types so apps only depend on libvex
+export type { IInvite, KeyStore, StoredCredentials } from "@vex-chat/types";

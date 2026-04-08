@@ -1,3 +1,5 @@
+import type { ILogger } from "../transport/types.js";
+import type { IWebSocketCtor } from "../transport/types.js";
 /**
  * Platform preset for tests — no I/O, no platform dependencies.
  *
@@ -6,25 +8,22 @@
  * - Logger:    console
  */
 import type { PlatformPreset } from "./types.js";
-import type { ILogger } from "../transport/types.js";
-import type { IWebSocketCtor } from "../transport/types.js";
 
 const logger: ILogger = {
+    debug() {},
+    error(m: string) {
+        console.error(`[test] ${m}`);
+    },
     info(m: string) {
         console.log(`[test] ${m}`);
     },
     warn(m: string) {
         console.warn(`[test] ${m}`);
     },
-    error(m: string) {
-        console.error(`[test] ${m}`);
-    },
-    debug() {},
 };
 
 export function testPreset(WebSocket: IWebSocketCtor): PlatformPreset {
     return {
-        deviceName: "test",
         adapters: {
             logger,
             WebSocket,
@@ -37,5 +36,6 @@ export function testPreset(WebSocket: IWebSocketCtor): PlatformPreset {
             await storage.init();
             return storage;
         },
+        deviceName: "test",
     };
 }

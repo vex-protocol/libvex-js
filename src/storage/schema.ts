@@ -3,86 +3,86 @@
  */
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
-interface MessagesTable {
-    nonce: string;
-    sender: string;
-    recipient: string;
-    group: string | null;
-    mailID: string;
-    message: string;
-    direction: string;
-    timestamp: string;
-    decrypted: number;
-    forward: number;
-    authorID: string;
-    readerID: string;
-}
-
-interface DevicesTable {
-    deviceID: string;
-    owner: string;
-    signKey: string;
-    name: string;
-    lastLogin: string;
-    deleted: number;
-}
-
-interface SessionsTable {
-    sessionID: string;
-    userID: string;
-    deviceID: string;
-    SK: string;
-    publicKey: string;
-    fingerprint: string;
-    mode: string;
-    lastUsed: string;
-    verified: number;
-}
-
-interface PreKeysTable {
-    index: Generated<number>;
-    keyID: string;
-    userID: string;
-    deviceID: string;
-    privateKey: string;
-    publicKey: string;
-    signature: string;
-}
-
-interface OneTimeKeysTable {
-    index: Generated<number>;
-    keyID: string;
-    userID: string;
-    deviceID: string;
-    privateKey: string;
-    publicKey: string;
-    signature: string;
-}
-
 export interface ClientDatabase {
-    messages: MessagesTable;
     devices: DevicesTable;
-    sessions: SessionsTable;
-    preKeys: PreKeysTable;
+    messages: MessagesTable;
     oneTimeKeys: OneTimeKeysTable;
+    preKeys: PreKeysTable;
+    sessions: SessionsTable;
 }
+
+export type DeviceRow = Selectable<DevicesTable>;
+
+export type DeviceUpdate = Updateable<DevicesTable>;
+
+export type MessageRow = Selectable<MessagesTable>;
+
+export type MessageUpdate = Updateable<MessagesTable>;
+
+export type NewDevice = Insertable<DevicesTable>;
 
 // ── Row utility types ────────────────────────────────────────────────────────
 
-export type MessageRow = Selectable<MessagesTable>;
 export type NewMessage = Insertable<MessagesTable>;
-export type MessageUpdate = Updateable<MessagesTable>;
-
-export type DeviceRow = Selectable<DevicesTable>;
-export type NewDevice = Insertable<DevicesTable>;
-export type DeviceUpdate = Updateable<DevicesTable>;
-
-export type SessionRow = Selectable<SessionsTable>;
-export type NewSession = Insertable<SessionsTable>;
-export type SessionUpdate = Updateable<SessionsTable>;
-
-export type PreKeyRow = Selectable<PreKeysTable>;
+export type NewOneTimeKey = Insertable<OneTimeKeysTable>;
 export type NewPreKey = Insertable<PreKeysTable>;
 
+export type NewSession = Insertable<SessionsTable>;
 export type OneTimeKeyRow = Selectable<OneTimeKeysTable>;
-export type NewOneTimeKey = Insertable<OneTimeKeysTable>;
+export type PreKeyRow = Selectable<PreKeysTable>;
+
+export type SessionRow = Selectable<SessionsTable>;
+export type SessionUpdate = Updateable<SessionsTable>;
+interface DevicesTable {
+    deleted: number;
+    deviceID: string;
+    lastLogin: string;
+    name: string;
+    owner: string;
+    signKey: string;
+}
+
+interface MessagesTable {
+    authorID: string;
+    decrypted: number;
+    direction: string;
+    forward: number;
+    group: null | string;
+    mailID: string;
+    message: string;
+    nonce: string;
+    readerID: string;
+    recipient: string;
+    sender: string;
+    timestamp: string;
+}
+interface OneTimeKeysTable {
+    deviceID: string;
+    index: Generated<number>;
+    keyID: string;
+    privateKey: string;
+    publicKey: string;
+    signature: string;
+    userID: string;
+}
+
+interface PreKeysTable {
+    deviceID: string;
+    index: Generated<number>;
+    keyID: string;
+    privateKey: string;
+    publicKey: string;
+    signature: string;
+    userID: string;
+}
+interface SessionsTable {
+    deviceID: string;
+    fingerprint: string;
+    lastUsed: string;
+    mode: string;
+    publicKey: string;
+    sessionID: string;
+    SK: string;
+    userID: string;
+    verified: number;
+}

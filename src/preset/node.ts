@@ -1,3 +1,4 @@
+import type { ILogger } from "../transport/types.js";
 /**
  * Platform preset for Node.js (CLI tools, bots, tests).
  *
@@ -9,7 +10,6 @@
  * browser bundles that import from the main entrypoint.
  */
 import type { PlatformPreset } from "./types.js";
-import type { ILogger } from "../transport/types.js";
 
 export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
     const { default: WebSocket } = await import("ws");
@@ -17,7 +17,6 @@ export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
     const logger: ILogger = createLogger("libvex", logLevel);
 
     return {
-        deviceName: process.platform,
         adapters: {
             logger,
             WebSocket: WebSocket as any,
@@ -26,5 +25,6 @@ export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
             const { createNodeStorage } = await import("../storage/node.js");
             return createNodeStorage(dbName, privateKey, _logger ?? logger);
         },
+        deviceName: process.platform,
     };
 }

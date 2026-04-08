@@ -5,9 +5,13 @@
 import type { IWebSocketLike } from "./types.js";
 
 export class BrowserWebSocket implements IWebSocketLike {
-    private ws: WebSocket;
-    private listeners = new Map<string, Map<Function, (ev: any) => void>>();
     onerror: ((err: any) => void) | null = null;
+    get readyState() {
+        return this.ws.readyState;
+    }
+    private readonly listeners = new Map<string, Map<Function, (ev: any) => void>>();
+
+    private readonly ws: WebSocket;
 
     constructor(url: string, _options?: object) {
         this.ws = new globalThis.WebSocket(url);
@@ -15,8 +19,16 @@ export class BrowserWebSocket implements IWebSocketLike {
         this.ws.onerror = (ev) => this.onerror?.(ev);
     }
 
-    get readyState() {
-        return this.ws.readyState;
+    close() {
+        this.ws.close();
+    }
+
+    off(event: string, listener: (...args: any[]) => void) {
+        const wrapped = this.listeners.get(event)?.get(listener);
+        if (wrapped) {
+            this.ws.removeEventListener(event, wrapped as any);
+            this.listeners.get(event)!.delete(listener);
+        }
     }
 
     on(event: string, listener: (...args: any[]) => void) {
@@ -33,9 +45,9 @@ export class BrowserWebSocket implements IWebSocketLike {
                 }
             };
         } else if (event === "open" || event === "close" || event === "error") {
-            wrapped = () => listener();
+            wrapped = () => { listener(); };
         } else {
-            wrapped = (ev: Event) => listener(ev);
+            wrapped = (ev: Event) => { listener(ev); };
         }
 
         if (!this.listeners.has(event)) {
@@ -45,20 +57,8 @@ export class BrowserWebSocket implements IWebSocketLike {
         this.ws.addEventListener(event, wrapped);
     }
 
-    off(event: string, listener: (...args: any[]) => void) {
-        const wrapped = this.listeners.get(event)?.get(listener);
-        if (wrapped) {
-            this.ws.removeEventListener(event, wrapped as any);
-            this.listeners.get(event)!.delete(listener);
-        }
-    }
-
     send(data: any) {
         this.ws.send(data);
-    }
-
-    close() {
-        this.ws.close();
     }
 
     terminate() {

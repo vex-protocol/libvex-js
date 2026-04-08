@@ -5,10 +5,12 @@
  * only available in Expo apps.
  */
 import { Kysely } from "kysely";
-import type { ClientDatabase } from "./schema.js";
-import { SqliteStorage } from "./sqlite.js";
+
 import type { IStorage } from "../IStorage.js";
 import type { ILogger } from "../transport/types.js";
+import type { ClientDatabase } from "./schema.js";
+
+import { SqliteStorage } from "./sqlite.js";
 
 export async function createExpoStorage(
     dbName: string,

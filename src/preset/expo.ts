@@ -8,28 +8,29 @@
  * expo-sqlite and kysely-expo are optional peerDependencies.
  */
 import { Platform } from "react-native";
-import { BrowserWebSocket } from "../transport/browser.js";
-import type { PlatformPreset } from "./types.js";
+
 import type { ILogger } from "../transport/types.js";
+import type { PlatformPreset } from "./types.js";
+
+import { BrowserWebSocket } from "../transport/browser.js";
 
 const logger: ILogger = {
+    debug(m: string) {
+        console.debug(`[vex] ${m}`);
+    },
+    error(m: string) {
+        console.error(`[vex] ${m}`);
+    },
     info(m: string) {
         console.log(`[vex] ${m}`);
     },
     warn(m: string) {
         console.warn(`[vex] ${m}`);
     },
-    error(m: string) {
-        console.error(`[vex] ${m}`);
-    },
-    debug(m: string) {
-        console.debug(`[vex] ${m}`);
-    },
 };
 
 export function expoPreset(): PlatformPreset {
     return {
-        deviceName: Platform.OS,
         adapters: {
             logger,
             WebSocket: BrowserWebSocket as any,
@@ -38,5 +39,6 @@ export function expoPreset(): PlatformPreset {
             const { createExpoStorage } = await import("../storage/expo.js");
             return createExpoStorage(dbName, privateKey, _logger ?? logger);
         },
+        deviceName: Platform.OS,
     };
 }

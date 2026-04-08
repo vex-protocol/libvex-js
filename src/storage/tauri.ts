@@ -5,10 +5,12 @@
  * only available inside a Tauri app.
  */
 import { Kysely } from "kysely";
-import type { ClientDatabase } from "./schema.js";
-import { SqliteStorage } from "./sqlite.js";
+
 import type { IStorage } from "../IStorage.js";
 import type { ILogger } from "../transport/types.js";
+import type { ClientDatabase } from "./schema.js";
+
+import { SqliteStorage } from "./sqlite.js";
 
 export async function createTauriStorage(
     dbName: string,
