@@ -84,6 +84,7 @@
         "license:check": "npx @onebeyond/license-checker scan --allowOnly MIT ISC BSD-2-Clause BSD-3-Clause Apache-2.0 0BSD MPL-2.0 CC0-1.0 CC-BY-4.0 Unlicense BlueOak-1.0.0 Python-2.0 Zlib PSF-2.0 Artistic-2.0 AGPL-3.0-or-later WTFPL --ignoreRootPackageLicense --disableReport"
     },
     "devDependencies": {
+        "@changesets/cli": "^2.30.0",
         "@tauri-apps/plugin-sql": "^2.4.0",
         "@types/better-sqlite3": "^7.6.13",
         "@types/ed2curve": "^0.2.4",

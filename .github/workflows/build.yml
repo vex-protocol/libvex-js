@@ -57,5 +57,8 @@ jobs:
             - name: Security audit
               run: npm audit --audit-level=high || true
 
+            - name: Check for changeset
+              run: npx changeset status --since=origin/master
+
             - name: Package
               run: npm pack
