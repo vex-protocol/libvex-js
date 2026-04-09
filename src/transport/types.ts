@@ -24,6 +24,6 @@ export interface WebSocketLike {
     on(event: "message", listener: (data: Uint8Array) => void): void;
     onerror: ((err: Error | Event) => void) | null;
     readyState: number;
-    send(data: string | Uint8Array): void;
+    send(data: Uint8Array): void;
     terminate?(): void;
 }

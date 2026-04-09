@@ -60,7 +60,7 @@ import { EventEmitter } from "eventemitter3";
 import * as uuid from "uuid";
 import { z } from "zod/v4";
 
-import { WebSocketAdapter } from "./transport/browser.js";
+import { WebSocketAdapter } from "./transport/websocket.js";
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2128,10 +2128,12 @@ export class Client {
             this.socket = new WebSocketAdapter(wsUrl);
             this.socket.on("open", () => {
                 this.log.info("Connection opened.");
-                // Send auth as first message before anything else.
-                this.socket.send(
-                    JSON.stringify({ token: this.token, type: "auth" }),
-                );
+                // Send auth as first message (encoded to bytes — protocol is binary).
+                const authMsg = JSON.stringify({
+                    token: this.token,
+                    type: "auth",
+                });
+                this.socket.send(new TextEncoder().encode(authMsg));
                 this.pingInterval = setInterval(this.ping.bind(this), 15000);
             });
 
