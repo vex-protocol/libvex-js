@@ -1,10 +1,12 @@
 /**
- * Wraps the browser's native WebSocket to match the WebSocketLike interface
- * expected by Client. Used by Tauri (webview) and future web builds.
+ * Adapts the standard WebSocket API (addEventListener/MessageEvent) to the
+ * EventEmitter-style .on()/.off() interface used internally by Client.
+ *
+ * Works everywhere: Node 22+, browsers, Tauri, React Native.
  */
 import type { WebSocketLike } from "./types.js";
 
-export class BrowserWebSocket implements WebSocketLike {
+export class WebSocketAdapter implements WebSocketLike {
     onerror: ((err: Error | Event) => void) | null = null;
     get readyState() {
         return this.ws.readyState;

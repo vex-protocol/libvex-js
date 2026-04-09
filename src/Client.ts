@@ -1,9 +1,5 @@
 import type { Storage } from "./Storage.js";
-import type {
-    ClientAdapters,
-    Logger,
-    WebSocketLike,
-} from "./transport/types.js";
+import type { Logger, WebSocketLike } from "./transport/types.js";
 import type { PreKeysCrypto, SessionCrypto, XKeyRing } from "./types/index.js";
 import type { KeyPair } from "@vex-chat/crypto";
 import type {
@@ -63,6 +59,8 @@ import axios, { type AxiosError, isAxiosError } from "axios";
 import { EventEmitter } from "eventemitter3";
 import * as uuid from "uuid";
 import { z } from "zod/v4";
+
+import { WebSocketAdapter } from "./transport/browser.js";
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -146,8 +144,6 @@ export type { Device } from "@vex-chat/types";
  * ClientOptions are the options you can pass into the client.
  */
 export interface ClientOptions {
-    /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
-    adapters?: ClientAdapters;
     /** Folder path where the sqlite file is created. */
     dbFolder?: string;
     /** Logging level for storage/database logs. */
@@ -165,6 +161,8 @@ export interface ClientOptions {
     host?: string;
     /** Use sqlite in-memory mode (`:memory:`) instead of a file. */
     inMemoryDb?: boolean;
+    /** Logger implementation. When omitted, defaults to winston (Node.js). */
+    logger?: Logger;
     /** Logging level for client runtime logs. */
     logLevel?:
         | "debug"
@@ -837,8 +835,6 @@ export class Client {
         retrieve: this.fetchUser.bind(this),
     };
 
-    private readonly adapters: ClientAdapters;
-
     private readonly database: Storage;
 
     private readonly dbPath: string;
@@ -892,7 +888,7 @@ export class Client {
         // (no super — composition, not inheritance)
         this.options = options;
 
-        this.log = options?.adapters?.logger ?? {
+        this.log = options?.logger ?? {
             debug() {},
             error() {},
             info() {},
@@ -932,17 +928,10 @@ export class Client {
             void this.close(true);
         });
 
-        if (!options?.adapters) {
-            throw new Error(
-                "No adapters provided. Use Client.create() which resolves adapters automatically.",
-            );
-        }
-        this.adapters = options.adapters;
-
         this.http = axios.create({ responseType: "arraybuffer" });
 
         // Placeholder connection — replaced by initSocket() during connect()
-        this.socket = new this.adapters.WebSocket("ws://localhost:1234");
+        this.socket = new WebSocketAdapter("ws://localhost:1234");
         this.socket.onerror = () => {};
 
         this.log.info(
@@ -981,27 +970,22 @@ export class Client {
         storage?: Storage,
     ): Promise<Client> => {
         let opts = options;
-        if (!opts?.adapters) {
-            const { default: WS } = await import("ws");
-            const { createNodeWebSocket } = await import("./transport/node.js");
+        if (!opts?.logger) {
             const { createLogger: makeLog } =
                 await import("./utils/createLogger.js");
             opts = {
                 ...opts,
-                adapters: {
-                    logger: makeLog("libvex", opts?.logLevel),
-                    WebSocket: createNodeWebSocket(WS),
-                },
+                logger: makeLog("libvex", opts?.logLevel),
             };
         }
-        // Lazily create Node Storage only on the Node path (no adapters).
-        // When adapters are provided (browser/RN), the caller must supply storage
+        // Lazily create Node Storage only on the Node path (no logger override).
+        // When a logger is provided (browser/RN), the caller must supply storage
         // via PlatformPreset.createStorage() — there is no Node fallback.
         let resolvedStorage = storage;
         if (!resolvedStorage) {
-            if (opts.adapters) {
+            if (opts.logger) {
                 throw new Error(
-                    "No storage provided. When using adapters (browser/RN), pass storage from your PlatformPreset.",
+                    "No storage provided. When using a custom logger (browser/RN), pass storage from your PlatformPreset.",
                 );
             }
             const { createNodeStorage } = await import("./storage/node.js");
@@ -1263,9 +1247,9 @@ export class Client {
         fn?: ClientEvents[E],
         context?: unknown,
     ): this {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- EventEmitter requires a generic listener type; the generic constraint on E guarantees type safety
         this.emitter.off(
             event,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- ee3 requires generic listener type; E constraint guarantees safety
             fn as ((...args: unknown[]) => void) | undefined,
             context,
         );
@@ -2141,7 +2125,7 @@ export class Client {
 
             const wsUrl = this.prefixes.WS + this.host + "/socket";
             // Auth sent as first message after open
-            this.socket = new this.adapters.WebSocket(wsUrl);
+            this.socket = new WebSocketAdapter(wsUrl);
             this.socket.on("open", () => {
                 this.log.info("Connection opened.");
                 // Send auth as first message before anything else.

@@ -27,13 +27,7 @@ export type {
 } from "./Client.js";
 export { createCodec, msgpack } from "./codec.js";
 export type { Storage } from "./Storage.js";
-export type {
-    ClientAdapters,
-    Logger,
-    WebSocketCtor,
-    WebSocketEventMap,
-    WebSocketLike,
-} from "./transport/types.js";
+export type { Logger } from "./transport/types.js";
 export type { KeyStore, StoredCredentials } from "./types/index.js";
 // Re-export app-facing types
 export type { Invite } from "@vex-chat/types";

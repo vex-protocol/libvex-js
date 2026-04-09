@@ -3,26 +3,17 @@ import type { Logger } from "../transport/types.js";
 /**
  * Platform preset for Node.js (CLI tools, bots, tests).
  *
- * - WebSocket: ws (loaded dynamically)
+ * - WebSocket: native global (Node 22+)
  * - Storage:   Kysely + better-sqlite3
  * - Logger:    winston (loaded dynamically)
- *
- * Async because ws and winston are lazy-loaded to keep them out of
- * browser bundles that import from the main entrypoint.
  */
 import type { PlatformPreset } from "./common.js";
 
 export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
-    const { default: WS } = await import("ws");
-    const { createNodeWebSocket } = await import("../transport/node.js");
     const { createLogger } = await import("../utils/createLogger.js");
     const logger: Logger = createLogger("libvex", logLevel);
 
     return {
-        adapters: {
-            logger,
-            WebSocket: createNodeWebSocket(WS),
-        },
         async createStorage(
             dbName,
             privateKey,
@@ -38,5 +29,6 @@ export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
             return storage;
         },
         deviceName: process.platform,
+        logger,
     };
 }

@@ -1,9 +1,8 @@
 import type { Logger } from "../transport/types.js";
-import type { WebSocketCtor } from "../transport/types.js";
 /**
  * Platform preset for tests — no I/O, no platform dependencies.
  *
- * - WebSocket: must be injected by the test (platform-specific)
+ * - WebSocket: native global (Node 22+)
  * - Storage:   in-memory (no persistence)
  * - Logger:    console
  */
@@ -22,12 +21,8 @@ const logger: Logger = {
     },
 };
 
-export function testPreset(WebSocket: WebSocketCtor): PlatformPreset {
+export function testPreset(): PlatformPreset {
     return {
-        adapters: {
-            logger,
-            WebSocket,
-        },
         async createStorage(_dbName, privateKey, _logger) {
             // Lazy import to avoid pulling eventemitter3 into the type graph
             const { MemoryStorage } =
@@ -37,5 +32,6 @@ export function testPreset(WebSocket: WebSocketCtor): PlatformPreset {
             return storage;
         },
         deviceName: "test",
+        logger,
     };
 }

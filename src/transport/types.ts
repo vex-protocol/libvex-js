@@ -1,19 +1,9 @@
-export interface ClientAdapters {
-    logger: Logger;
-    WebSocket: WebSocketCtor;
-}
-
 export interface Logger {
     debug(message: string, ...args: unknown[]): void;
     error(message: string, ...args: unknown[]): void;
     info(message: string, ...args: unknown[]): void;
     warn(message: string, ...args: unknown[]): void;
 }
-
-export type WebSocketCtor = new (
-    url: string,
-    options?: object,
-) => WebSocketLike;
 
 export type WebSocketEvent = keyof WebSocketEventMap;
 
