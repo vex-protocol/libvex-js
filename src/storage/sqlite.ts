@@ -509,51 +509,39 @@ export class SqliteStorage extends EventEmitter implements Storage {
         }
 
         const table = oneTime ? ("oneTimeKeys" as const) : ("preKeys" as const);
-        const addedIndexes: number[] = [];
+        const saved: PreKeysSQL[] = [];
 
         for (const preKey of preKeys) {
-            const result = await this.db
+            // Use RETURNING to get the autoincrement index in the same statement.
+            // Portable across all SQLite dialects (SQLite 3.35+).
+            const row = await this.db
                 .insertInto(table)
                 .values({
                     privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
                 })
-                .executeTakeFirst();
-            if (result.insertId !== undefined) {
-                addedIndexes.push(Number(result.insertId));
-            }
-        }
+                .returning([
+                    "deviceID",
+                    "index",
+                    "keyID",
+                    "publicKey",
+                    "signature",
+                    "userID",
+                ])
+                .executeTakeFirstOrThrow();
 
-        let rows;
-        if (addedIndexes.length > 0) {
-            rows = await this.db
-                .selectFrom(table)
-                .selectAll()
-                .where("index", "in", addedIndexes)
-                .execute();
-        } else {
-            // Fallback for dialects that don't return insertId (e.g. Tauri SQLite).
-            // Query the last N rows by descending index.
-            rows = await this.db
-                .selectFrom(table)
-                .selectAll()
-                .orderBy("index", "desc")
-                .limit(preKeys.length)
-                .execute();
-            rows.reverse();
-        }
-
-        return rows.map(
-            (row): PreKeysSQL => ({
+            saved.push({
                 deviceID: row.deviceID,
                 index: row.index,
                 keyID: row.keyID,
                 publicKey: row.publicKey,
                 signature: row.signature,
                 userID: row.userID,
-            }),
-        );
+            });
+        }
+
+        return saved;
     }
 
     // ── Purge ────────────────────────────────────────────────────────────────
