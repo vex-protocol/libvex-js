@@ -236,6 +236,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             return null;
         }
         return {
+            index: preKeyInfo.index,
             keyPair: xBoxKeyPairFromSecret(
                 XUtils.decodeHex(preKeyInfo.privateKey),
             ),
