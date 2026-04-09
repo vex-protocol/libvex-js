@@ -73,9 +73,9 @@ export function platformSuite(
         test("two-user DM", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
@@ -91,7 +91,7 @@ export function platformSuite(
                 expect(regErr).toBeNull();
 
                 const loginErr = await client2.login(username2, "test-pw-2");
-                expect(loginErr).toBeFalsy();
+                expect(loginErr.ok).toBe(true);
 
                 await connectAndWait(client2, "client2");
 
@@ -113,9 +113,9 @@ export function platformSuite(
         test("group messaging in channel", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
@@ -174,9 +174,9 @@ export function platformSuite(
             const deviceKey = client.getKeys().private;
             const deviceID = client.me.device().deviceID;
             const opts2: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
@@ -274,9 +274,9 @@ export function platformSuite(
         test.skip("multi-device message sync", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
@@ -286,9 +286,9 @@ export function platformSuite(
             // Sender: separate user
             const SK3 = Client.generateSecretKey();
             const opts3: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };

@@ -98,10 +98,13 @@ export class WebSocketAdapter implements WebSocketLike {
         }
     }
 
-    send(data: Uint8Array) {
-        // DOM WebSocket.send() requires Uint8Array<ArrayBuffer> (not SharedArrayBuffer).
-        // Copy into a fresh ArrayBuffer-backed Uint8Array to satisfy the type constraint.
-        this.ws.send(new Uint8Array(data));
+    send(data: string | Uint8Array) {
+        if (typeof data === "string") {
+            this.ws.send(data);
+        } else {
+            // DOM WebSocket.send() requires Uint8Array<ArrayBuffer> (not SharedArrayBuffer).
+            this.ws.send(new Uint8Array(data));
+        }
     }
 
     terminate() {
