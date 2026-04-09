@@ -11,10 +11,15 @@ export interface KeyPair {
     secretKey: Uint8Array;
 }
 
-export interface PreKeysCrypto {
-    index?: number;
+/** Prekey before DB storage — no index yet. */
+export interface UnsavedPreKey {
     keyPair: KeyPair;
     signature: Uint8Array;
+}
+
+/** Prekey after DB storage — index assigned by autoincrement. */
+export interface PreKeysCrypto extends UnsavedPreKey {
+    index: number;
 }
 
 export interface SessionCrypto {

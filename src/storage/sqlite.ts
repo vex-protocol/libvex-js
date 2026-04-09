@@ -1,7 +1,7 @@
 import type { Message } from "../index.js";
 import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
-import type { PreKeysCrypto, SessionCrypto } from "../types/index.js";
+import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "../types/index.js";
 import type {
     ClientDatabase,
     DeviceRow,
@@ -498,7 +498,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
     }
 
     async savePreKeys(
-        preKeys: PreKeysCrypto[],
+        preKeys: UnsavedPreKey[],
         oneTime: boolean,
     ): Promise<PreKeysSQL[]> {
         await this.untilReady();

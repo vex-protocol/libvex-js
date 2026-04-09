@@ -1,6 +1,6 @@
 import type { Storage } from "./Storage.js";
 import type { Logger, WebSocketLike } from "./transport/types.js";
-import type { PreKeysCrypto, SessionCrypto, XKeyRing } from "./types/index.js";
+import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey, XKeyRing } from "./types/index.js";
 import type { KeyPair } from "@vex-chat/crypto";
 import type {
     ActionToken,
@@ -1480,16 +1480,15 @@ export class Client {
         return decodeAxios(InviteCodec, res.data);
     }
 
-    private createPreKey() {
+    private createPreKey(): UnsavedPreKey {
         const preKeyPair = xBoxKeyPair();
-        const preKeys: PreKeysCrypto = {
+        return {
             keyPair: preKeyPair,
             signature: xSign(
                 xEncode(xConstants.CURVE, preKeyPair.publicKey),
                 this.signKeys.secretKey,
             ),
         };
-        return preKeys;
     }
 
     private async createServer(name: string): Promise<Server> {
@@ -2270,16 +2269,15 @@ export class Client {
         }
         const identityKeys = this.idKeys;
 
-        let preKeys = await this.database.getPreKeys();
-        if (!preKeys) {
+        const existingPreKeys = await this.database.getPreKeys();
+        const preKeys: PreKeysCrypto = existingPreKeys ?? await (async () => {
             this.log.warn("No prekeys found in database, creating a new one.");
-            preKeys = this.createPreKey();
-            const saved = await this.database.savePreKeys([preKeys], false);
-            // Update with the DB-assigned index (autoincrement)
-            if (saved[0]?.index != null) {
-                preKeys = { ...preKeys, index: saved[0].index };
-            }
-        }
+            const unsaved = this.createPreKey();
+            const [saved] = await this.database.savePreKeys([unsaved], false);
+            if (!saved || saved.index == null)
+                throw new Error("Failed to save prekey — no index returned.");
+            return { ...unsaved, index: saved.index };
+        })();
 
         const sessions = await this.database.getAllSessions();
         for (const session of sessions) {
@@ -3144,7 +3142,7 @@ export class Client {
     }
 
     private async submitOTK(amount: number) {
-        const otks: PreKeysCrypto[] = [];
+        const otks: UnsavedPreKey[] = [];
 
         const t0 = performance.now();
         for (let i = 0; i < amount; i++) {

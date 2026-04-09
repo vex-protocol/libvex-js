@@ -1,5 +1,5 @@
 import type { Message, Session } from "./index.js";
-import type { PreKeysCrypto, SessionCrypto } from "./types/index.js";
+import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "./types/index.js";
 import type { Device, PreKeysSQL } from "@vex-chat/types";
 import type { EventEmitter } from "eventemitter3";
 /**
@@ -108,7 +108,7 @@ export interface Storage extends EventEmitter {
      * @param oneTime `true` for one-time keys, `false` for the long-lived signed prekey.
      */
     savePreKeys: (
-        preKeys: PreKeysCrypto[],
+        preKeys: UnsavedPreKey[],
         oneTime: boolean,
     ) => Promise<PreKeysSQL[]>;
     /** Persists an encryption session. */

@@ -1,6 +1,6 @@
 import type { Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
-import type { PreKeysCrypto, SessionCrypto } from "../../types/index.js";
+import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "../../types/index.js";
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 
 import {
@@ -119,6 +119,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
         const pk = this.preKeys[0];
         if (!pk.privateKey) return Promise.resolve(null);
         return Promise.resolve({
+            index: pk.index,
             keyPair: xBoxKeyPairFromSecret(XUtils.decodeHex(pk.privateKey)),
             signature: XUtils.decodeHex(pk.signature),
         });
@@ -191,7 +192,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
     }
 
     savePreKeys(
-        preKeys: PreKeysCrypto[],
+        preKeys: UnsavedPreKey[],
         oneTime: boolean,
     ): Promise<PreKeysSQL[]> {
         const added: PreKeysSQL[] = [];

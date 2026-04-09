@@ -2,6 +2,7 @@ export type {
     KeyPair,
     PreKeysCrypto,
     SessionCrypto,
+    UnsavedPreKey,
     XKeyRing,
 } from "./crypto.js";
 
