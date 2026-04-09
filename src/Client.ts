@@ -1,5 +1,3 @@
-// tslint:disable: no-empty-interface
-
 import type { Storage } from "./Storage.js";
 import type {
     ClientAdapters,
@@ -363,8 +361,8 @@ const mailInboxEntry = z.tuple([
  * @ignore
  */
 export interface Messages {
-    /** Deletes local history for a user/channel, optionally older than a duration. */
-    delete: (userOrChannelID: string, duration?: string) => Promise<void>;
+    /** Deletes local history for a user/channel. */
+    delete: (userOrChannelID: string) => Promise<void>;
     /** Sends an encrypted message to all members of a channel. */
     group: (channelID: string, message: string) => Promise<void>;
     /** Deletes all locally stored message history. */
@@ -514,16 +512,11 @@ export type VexFile = FileSQL;
  *     // generate a secret key to use, save this somewhere permanent
  *     const privateKey = Client.generateSecretKey();
  *
- *     const client = new Client(privateKey);
+ *     const client = await Client.create(privateKey);
  *
- *     // the ready event is emitted when init() is finished.
- *     // you must wait until this event fires to perform
- *     // registration or login.
- *     client.on("ready", async () => {
- *         // you must register once before you can log in
- *         await client.register(Client.randomUsername());
- *         await client.login();
- *     })
+ *     // you must register once before you can log in
+ *     await client.register(Client.randomUsername());
+ *     await client.login();
  *
  *     // The authed event fires when login() successfully completes
  *     // and the server indicates you are authorized. You must wait to
@@ -540,10 +533,6 @@ export type VexFile = FileSQL;
  *     client.on("message", (message) => {
  *         console.log("message:", message);
  *     })
- *
- *     // you must call init() to initialize the keyring and
- *     // start the client.
- *     client.init();
  * }
  *
  * main();
@@ -1696,11 +1685,8 @@ export class Client extends EventEmitter<ClientEvents> {
         );
     }
 
-    private async deleteHistory(
-        channelOrUserID: string,
-        olderThan?: string,
-    ): Promise<void> {
-        await this.database.deleteHistory(channelOrUserID, olderThan);
+    private async deleteHistory(channelOrUserID: string): Promise<void> {
+        await this.database.deleteHistory(channelOrUserID);
     }
 
     private async deletePermission(permissionID: string): Promise<void> {

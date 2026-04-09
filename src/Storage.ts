@@ -20,15 +20,9 @@ export interface Storage extends EventEmitter {
     /**
      * Deletes history for a direct conversation or group channel.
      *
-     * If `olderThan` is omitted, the full history for that thread is removed.
-     *
      * @param channelOrUserID Channel ID or user ID whose history should be deleted.
-     * @param olderThan Relative duration such as `1h`, `7d`, or `30m`.
      */
-    deleteHistory: (
-        channelOrUserID: string,
-        olderThan?: string,
-    ) => Promise<void>;
+    deleteHistory: (channelOrUserID: string) => Promise<void>;
     /** Deletes one message by `mailID`. */
     deleteMessage: (mailID: string) => Promise<void>;
     /** Deletes one one-time key by index. */

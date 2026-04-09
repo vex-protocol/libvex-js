@@ -1,10 +1,4 @@
-import { parse as uuidParse, v4 as uuidv4 } from "uuid";
-/**
- * @ignore
- */
-export function createUint8UUID() {
-    return uuidToUint8(uuidv4());
-}
+import { parse as uuidParse } from "uuid";
 /**
  * @ignore
  */

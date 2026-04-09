@@ -55,10 +55,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         await this.db.destroy();
     }
 
-    async deleteHistory(
-        channelOrUserID: string,
-        _olderThan?: string,
-    ): Promise<void> {
+    async deleteHistory(channelOrUserID: string): Promise<void> {
         await this.db
             .deleteFrom("messages")
             .where((eb) =>
