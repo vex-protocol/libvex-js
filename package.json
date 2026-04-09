@@ -122,8 +122,11 @@
         "registry": "https://registry.npmjs.org/"
     },
     "lint-staged": {
-        "*.ts": [
+        "src/**/*.ts": [
             "eslint --fix",
+            "prettier --write"
+        ],
+        "*.{json,md}": [
             "prettier --write"
         ]
     }
