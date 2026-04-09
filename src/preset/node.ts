@@ -10,7 +10,7 @@ import type { Logger } from "../transport/types.js";
  * Async because ws and winston are lazy-loaded to keep them out of
  * browser bundles that import from the main entrypoint.
  */
-import type { PlatformPreset } from "./types.js";
+import type { PlatformPreset } from "./common.js";
 
 export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
     const { default: WS } = await import("ws");

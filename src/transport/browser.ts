@@ -97,7 +97,9 @@ export class BrowserWebSocket implements WebSocketLike {
     }
 
     send(data: Uint8Array) {
-        this.ws.send(data);
+        // Buffer narrowing required by DOM's WebSocket.send() signature
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Uint8Array from msgpackr always backed by ArrayBuffer
+        this.ws.send(data as Uint8Array<ArrayBuffer>);
     }
 
     terminate() {

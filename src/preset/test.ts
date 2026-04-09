@@ -7,7 +7,7 @@ import type { WebSocketCtor } from "../transport/types.js";
  * - Storage:   in-memory (no persistence)
  * - Logger:    console
  */
-import type { PlatformPreset } from "./types.js";
+import type { PlatformPreset } from "./common.js";
 
 const logger: Logger = {
     debug() {},

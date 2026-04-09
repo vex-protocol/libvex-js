@@ -26,7 +26,6 @@ export type {
     VexFile,
 } from "./Client.js";
 export { createCodec, msgpack } from "./codec.js";
-export type { PlatformPreset } from "./preset/types.js";
 export type { Storage } from "./Storage.js";
 export type {
     ClientAdapters,
