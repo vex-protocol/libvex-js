@@ -1,7 +1,13 @@
 /**
  * Kysely typed table interfaces for the client-side SQLite database.
  */
-import type { Generated, Insertable, Selectable, Updateable } from "kysely";
+import type {
+    ColumnType,
+    Generated,
+    Insertable,
+    Selectable,
+    Updateable,
+} from "kysely";
 
 export interface ClientDatabase {
     devices: DevicesTable;
@@ -57,23 +63,23 @@ interface MessagesTable {
     timestamp: string;
 }
 interface OneTimeKeysTable {
-    deviceID: string;
+    deviceID: ColumnType<string, string | undefined, string>;
     index: Generated<number>;
-    keyID: string;
+    keyID: ColumnType<string, string | undefined, string>;
     privateKey: string;
     publicKey: string;
     signature: string;
-    userID: string;
+    userID: ColumnType<string, string | undefined, string>;
 }
 
 interface PreKeysTable {
-    deviceID: string;
+    deviceID: ColumnType<string, string | undefined, string>;
     index: Generated<number>;
-    keyID: string;
+    keyID: ColumnType<string, string | undefined, string>;
     privateKey: string;
     publicKey: string;
     signature: string;
-    userID: string;
+    userID: ColumnType<string, string | undefined, string>;
 }
 interface SessionsTable {
     deviceID: string;

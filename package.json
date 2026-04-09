@@ -134,8 +134,7 @@
         "@tauri-apps/plugin-sql": ">=2.0.0",
         "better-sqlite3": ">=11.0.0",
         "expo-sqlite": ">=14.0.0",
-        "kysely-dialect-tauri": ">=1.2.0",
-        "kysely-expo": ">=5.0.0"
+        "kysely-dialect-tauri": ">=1.2.0"
     },
     "peerDependenciesMeta": {
         "@tauri-apps/plugin-sql": {

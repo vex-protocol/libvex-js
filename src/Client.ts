@@ -92,99 +92,6 @@ import { uuidToUint8 } from "./utils/uint8uuid.js";
 
 const _protocolMsgRegex = /��\w+:\w+��/g;
 
-// tslint:disable-next-line: interface-name
-// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
-export declare interface Client {
-    /**
-     * This is emitted for file progress events.
-     *
-     * Example:
-     *
-     * ```ts
-     *   client.on("ready", () => {
-     *       await client.register()
-     *   });
-     * ```
-     *
-     * @event
-     */
-    on(event: "fileProgress", callback: (progress: FileProgress) => void): this;
-
-    /**
-     * This is emitted whenever the keyring is done initializing after an init()
-     * call. You must wait to login or register until after this event.
-     *
-     * Example:
-     *
-     * ```ts
-     *   client.on("ready", () => {
-     *       await client.register()
-     *   });
-     * ```
-     *
-     * @event
-     */
-    on(
-        event:
-            | "closed"
-            | "connected"
-            | "decryptingMail"
-            | "disconnect"
-            | "ready",
-        callback: () => void,
-    ): this;
-
-    /**
-     * This is emitted for every sent and received message.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("message", (msg: Message) => {
-     *       console.log(message);
-     *   });
-     * ```
-     * @event
-     */
-    on(event: "message", callback: (message: Message) => void): this;
-
-    /**
-     * This is emitted when the user is granted a new permission.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("permission", (perm: Permission) => {
-     *       console.log(perm);
-     *   });
-     * ```
-     * @event
-     */
-    on(event: "permission", callback: (permission: Permission) => void): this;
-
-    /**
-     * This is emitted for a new encryption session being created with
-     * a specific user.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("session", (session: Session, user: User) => {
-     *       console.log(session);
-     *       console.log(user);
-     *   });
-     * ```
-     * @event
-     */
-    on(
-        event: "session",
-        callback: (session: Session, user: User) => void,
-    ): this;
-}
-
 /**
  * Permission is a permission to a resource.
  *
@@ -614,8 +521,23 @@ export type VexFile = FileSQL;
  * main();
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
-export class Client extends EventEmitter {
+
+/**
+ * Event signatures emitted by {@link Client}.
+ */
+interface ClientEvents {
+    closed: () => void;
+    connected: () => void;
+    decryptingMail: () => void;
+    disconnect: () => void;
+    fileProgress: (progress: FileProgress) => void;
+    message: (message: Message) => void;
+    permission: (permission: Permission) => void;
+    ready: () => void;
+    session: (session: Session, user: User) => void;
+}
+
+export class Client extends EventEmitter<ClientEvents> {
     /**
      * Decrypts a secret key from encrypted data produced by encryptKeyData().
      *
@@ -800,7 +722,7 @@ export class Client extends EventEmitter {
         retrieve: this.getPermissions.bind(this),
     };
 
-    public sending: Record<string, Device> = {};
+    public sending = new Map<string, Device>();
 
     /**
      * Server operations.
@@ -1681,9 +1603,9 @@ export class Client extends EventEmitter {
         this.emit("session", sessionEntry, user);
 
         // emit the message
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
         const forwardedMsg = forward
-            ? (msgpack.decode(message) as Message)
+            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
+              (msgpack.decode(message) as Message)
             : null;
         const emitMsg: Message = forwardedMsg
             ? { ...forwardedMsg, forward: true }
@@ -1726,8 +1648,7 @@ export class Client extends EventEmitter {
             void this.send(msg, hmac);
             this.log.info("Mail sent.");
         });
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- keyed by runtime device ID
-        delete this.sending[device.deviceID];
+        this.sending.delete(device.deviceID);
     }
 
     private async deleteChannel(channelID: string): Promise<void> {
@@ -1919,18 +1840,17 @@ export class Client extends EventEmitter {
 
         this.log.info("fetching mail for device " + this.getDevice().deviceID);
         try {
-            const res = await this.ax.post(
+            const res = await this.ax.post<ArrayBuffer>(
                 this.getHost() +
                     "/device/" +
                     this.getDevice().deviceID +
                     "/mail",
             );
-            /* eslint-disable @typescript-eslint/no-unsafe-type-assertion -- axios arraybuffer response; msgpack payload trusted from server */
-            const mailBuffer = new Uint8Array(res.data as ArrayBuffer);
+            const mailBuffer = new Uint8Array(res.data);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack payload trusted from server
             const rawInbox = msgpack.decode(mailBuffer) as Array<
                 [Uint8Array, MailWS, string]
             >;
-            /* eslint-enable @typescript-eslint/no-unsafe-type-assertion */
             const inbox = rawInbox.sort((a, b) => b[2].localeCompare(a[2]));
 
             for (const mailDetails of inbox) {
@@ -2316,8 +2236,7 @@ export class Client extends EventEmitter {
 
     private async postAuth() {
         let count = 0;
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite polling loop
-        while (true) {
+        for (;;) {
             try {
                 await this.getMail();
                 count++;
@@ -2501,9 +2420,9 @@ export class Client extends EventEmitter {
                         }
 
                         // emit the message
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
                         const fwdMsg1 = mail.forward
-                            ? (msgpack.decode(unsealed) as Message)
+                            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
+                              (msgpack.decode(unsealed) as Message)
                             : null;
                         const message: Message = fwdMsg1
                             ? { ...fwdMsg1, forward: true }
@@ -2638,9 +2557,9 @@ export class Client extends EventEmitter {
                     if (decrypted) {
                         this.log.info("Decryption successful.");
                         // emit the message
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
                         const fwdMsg2 = mail.forward
-                            ? (msgpack.decode(decrypted) as Message)
+                            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
+                              (msgpack.decode(decrypted) as Message)
                             : null;
                         const message: Message = fwdMsg2
                             ? {
@@ -2800,24 +2719,27 @@ export class Client extends EventEmitter {
         );
         const details = decodeAxios(FileSQLCodec, detailsRes.data);
 
-        const res = await this.ax.get(this.getHost() + "/file/" + fileID, {
-            onDownloadProgress: (progressEvent) => {
-                const percentCompleted = Math.round(
-                    (progressEvent.loaded * 100) / (progressEvent.total ?? 1),
-                );
-                const { loaded, total = 0 } = progressEvent;
-                const progress: FileProgress = {
-                    direction: "download",
-                    loaded,
-                    progress: percentCompleted,
-                    token: fileID,
-                    total,
-                };
-                this.emit("fileProgress", progress);
+        const res = await this.ax.get<ArrayBuffer>(
+            this.getHost() + "/file/" + fileID,
+            {
+                onDownloadProgress: (progressEvent) => {
+                    const percentCompleted = Math.round(
+                        (progressEvent.loaded * 100) /
+                            (progressEvent.total ?? 1),
+                    );
+                    const { loaded, total = 0 } = progressEvent;
+                    const progress: FileProgress = {
+                        direction: "download",
+                        loaded,
+                        progress: percentCompleted,
+                        token: fileID,
+                        total,
+                    };
+                    this.emit("fileProgress", progress);
+                },
             },
-        });
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- axios arraybuffer response
-        const fileData = res.data as ArrayBuffer;
+        );
+        const fileData = res.data;
 
         const decrypted = nacl.secretbox.open(
             new Uint8Array(fileData),
@@ -2980,7 +2902,7 @@ export class Client extends EventEmitter {
         forward: boolean,
         retry = false,
     ): Promise<void> {
-        while (device.deviceID in this.sending) {
+        while (this.sending.has(device.deviceID)) {
             this.log.warn(
                 "Sending in progress to device ID " +
                     device.deviceID +
@@ -2995,7 +2917,7 @@ export class Client extends EventEmitter {
             "Sending mail to device:\n " +
                 JSON.stringify(device.deviceID, null, 4),
         );
-        this.sending[device.deviceID] = device;
+        this.sending.set(device.deviceID, device);
 
         const session = await this.database.getSessionByDeviceID(
             device.deviceID,
@@ -3080,8 +3002,7 @@ export class Client extends EventEmitter {
             this.conn.on("message", callback);
             void this.send(msgb, hmac);
         });
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- keyed by runtime device ID
-        delete this.sending[device.deviceID];
+        this.sending.delete(device.deviceID);
     }
 
     private async sendMessage(userID: string, message: string): Promise<void> {

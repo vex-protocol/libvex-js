@@ -9,7 +9,7 @@ import type {
     SessionRow,
 } from "./schema.js";
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
-import type { Insertable, Kysely } from "kysely";
+import type { Kysely } from "kysely";
 
 /**
  * Unified Kysely-based SQLite storage implementation.
@@ -509,12 +509,11 @@ export class SqliteStorage extends EventEmitter implements Storage {
         for (const preKey of preKeys) {
             const result = await this.db
                 .insertInto(table)
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Kysely Insertable requires all non-Generated columns; SQLite allows omitting TEXT columns with implicit NULL
                 .values({
                     privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
-                } as Insertable<ClientDatabase[typeof table]>)
+                })
                 .executeTakeFirst();
             if (result.insertId !== undefined) {
                 addedIndexes.push(Number(result.insertId));

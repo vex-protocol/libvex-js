@@ -8,8 +8,6 @@
 import type { WebSocketCtor, WebSocketLike } from "./types.js";
 import type WS from "ws";
 
-type AnyListener = (...args: never[]) => void;
-
 /**
  * Create a WebSocketCtor that wraps the `ws` library to satisfy WebSocketLike.
  * Call with the already-imported `ws` default export:
@@ -20,23 +18,28 @@ type AnyListener = (...args: never[]) => void;
 export function createNodeWebSocket(
     WsCtor: new (url: string, options?: WS.ClientOptions) => WS,
 ): WebSocketCtor {
-    /* eslint-disable @typescript-eslint/no-unsafe-type-assertion --
-       Event-dispatch narrowing and WS.ClientOptions cast are safe
-       (we control the call sites; object ⊂ ClientOptions at runtime). */
-    return class NodeWebSocket implements WebSocketLike {
+    const Ctor: WebSocketCtor = class NodeWebSocket implements WebSocketLike {
         onerror: ((err: Error | Event) => void) | null = null;
         get readyState() {
             return this.ws.readyState;
         }
-        private readonly wrappedListeners = new Map<
-            AnyListener,
+        private readonly errorListeners = new Map<
+            (error: Error) => void,
+            (...args: unknown[]) => void
+        >();
+        private readonly lifecycleListeners = new Map<
+            () => void,
+            (...args: unknown[]) => void
+        >();
+        private readonly messageListeners = new Map<
+            (data: Uint8Array) => void,
             (...args: unknown[]) => void
         >();
 
         private readonly ws: WS;
 
-        constructor(url: string, options?: object) {
-            this.ws = new WsCtor(url, options as WS.ClientOptions);
+        constructor(url: string, options?: WS.ClientOptions) {
+            this.ws = new WsCtor(url, options);
             this.ws.on("error", (err: Error) => this.onerror?.(err));
         }
 
@@ -47,44 +50,65 @@ export function createNodeWebSocket(
         off(event: "close" | "open", listener: () => void): void;
         off(event: "error", listener: (error: Error) => void): void;
         off(event: "message", listener: (data: Uint8Array) => void): void;
-        off(event: string, listener: AnyListener): void {
-            const wrapped = this.wrappedListeners.get(listener);
-            if (wrapped) {
-                this.ws.off(event, wrapped);
-                this.wrappedListeners.delete(listener);
+        off(event: string, listener: never): void {
+            if (event === "message") {
+                const typedListener: (data: Uint8Array) => void = listener;
+                const wrapped = this.messageListeners.get(typedListener);
+                if (wrapped) {
+                    this.ws.off(event, wrapped);
+                    this.messageListeners.delete(typedListener);
+                }
+            } else if (event === "error") {
+                const typedListener: (error: Error) => void = listener;
+                const wrapped = this.errorListeners.get(typedListener);
+                if (wrapped) {
+                    this.ws.off(event, wrapped);
+                    this.errorListeners.delete(typedListener);
+                }
+            } else {
+                const typedListener: () => void = listener;
+                const wrapped = this.lifecycleListeners.get(typedListener);
+                if (wrapped) {
+                    this.ws.off(event, wrapped);
+                    this.lifecycleListeners.delete(typedListener);
+                }
             }
         }
 
         on(event: "close" | "open", listener: () => void): void;
         on(event: "error", listener: (error: Error) => void): void;
         on(event: "message", listener: (data: Uint8Array) => void): void;
-        on(event: string, listener: AnyListener): void {
-            let wrapped: (...args: unknown[]) => void;
-
+        on(event: string, listener: never): void {
             if (event === "message") {
-                // ws passes Buffer (extends Uint8Array) with default nodebuffer mode
-                wrapped = (data: unknown) => {
-                    (listener as unknown as (data: Uint8Array) => void)(
-                        data instanceof Uint8Array
-                            ? data
-                            : new Uint8Array(data as ArrayBuffer),
-                    );
+                const typedListener: (data: Uint8Array) => void = listener;
+                const wrapped = (data: unknown) => {
+                    // ws passes Buffer (extends Uint8Array) with default nodebuffer mode
+                    if (data instanceof Uint8Array) {
+                        typedListener(data);
+                    } else if (data instanceof ArrayBuffer) {
+                        typedListener(new Uint8Array(data));
+                    }
                 };
+                this.messageListeners.set(typedListener, wrapped);
+                this.ws.on(event, wrapped);
             } else if (event === "error") {
-                wrapped = (err: unknown) => {
-                    (listener as unknown as (error: Error) => void)(
+                const typedListener: (error: Error) => void = listener;
+                const wrapped = (err: unknown) => {
+                    typedListener(
                         err instanceof Error ? err : new Error(String(err)),
                     );
                 };
+                this.errorListeners.set(typedListener, wrapped);
+                this.ws.on(event, wrapped);
             } else {
                 // "open" | "close"
-                wrapped = () => {
-                    (listener as unknown as () => void)();
+                const typedListener: () => void = listener;
+                const wrapped = () => {
+                    typedListener();
                 };
+                this.lifecycleListeners.set(typedListener, wrapped);
+                this.ws.on(event, wrapped);
             }
-
-            this.wrappedListeners.set(listener, wrapped);
-            this.ws.on(event, wrapped);
         }
 
         send(data: Uint8Array) {
@@ -94,6 +118,6 @@ export function createNodeWebSocket(
         terminate() {
             this.ws.terminate();
         }
-    } as WebSocketCtor;
-    /* eslint-enable @typescript-eslint/no-unsafe-type-assertion */
+    };
+    return Ctor;
 }

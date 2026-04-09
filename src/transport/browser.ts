@@ -4,14 +4,20 @@
  */
 import type { WebSocketLike } from "./types.js";
 
-type AnyListener = (...args: never[]) => void;
-
 export class BrowserWebSocket implements WebSocketLike {
     onerror: ((err: Error | Event) => void) | null = null;
     get readyState() {
         return this.ws.readyState;
     }
-    private readonly wrappedListeners = new Map<AnyListener, EventListener>();
+    private readonly errorListeners = new Map<
+        (error: Error) => void,
+        EventListener
+    >();
+    private readonly lifecycleListeners = new Map<() => void, EventListener>();
+    private readonly messageListeners = new Map<
+        (data: Uint8Array) => void,
+        EventListener
+    >();
 
     private readonly ws: WebSocket;
 
@@ -28,52 +34,67 @@ export class BrowserWebSocket implements WebSocketLike {
     off(event: "close" | "open", listener: () => void): void;
     off(event: "error", listener: (error: Error) => void): void;
     off(event: "message", listener: (data: Uint8Array) => void): void;
-    off(event: string, listener: AnyListener): void {
-        const wrapped = this.wrappedListeners.get(listener);
-        if (wrapped) {
-            this.ws.removeEventListener(event, wrapped);
-            this.wrappedListeners.delete(listener);
+    off(event: string, listener: never): void {
+        if (event === "message") {
+            const typedListener: (data: Uint8Array) => void = listener;
+            const wrapped = this.messageListeners.get(typedListener);
+            if (wrapped) {
+                this.ws.removeEventListener(event, wrapped);
+                this.messageListeners.delete(typedListener);
+            }
+        } else if (event === "error") {
+            const typedListener: (error: Error) => void = listener;
+            const wrapped = this.errorListeners.get(typedListener);
+            if (wrapped) {
+                this.ws.removeEventListener(event, wrapped);
+                this.errorListeners.delete(typedListener);
+            }
+        } else {
+            const typedListener: () => void = listener;
+            const wrapped = this.lifecycleListeners.get(typedListener);
+            if (wrapped) {
+                this.ws.removeEventListener(event, wrapped);
+                this.lifecycleListeners.delete(typedListener);
+            }
         }
     }
 
     on(event: "close" | "open", listener: () => void): void;
     on(event: "error", listener: (error: Error) => void): void;
     on(event: "message", listener: (data: Uint8Array) => void): void;
-    /* eslint-disable @typescript-eslint/no-unsafe-type-assertion --
-       Event-dispatch narrowing: implementation dispatches by event name,
-       so casts from AnyListener to the specific handler type are safe. */
-    on(event: string, listener: AnyListener): void {
-        let wrapped: EventListener;
-
+    on(event: string, listener: never): void {
         if (event === "message") {
-            wrapped = (ev: Event) => {
+            const typedListener: (data: Uint8Array) => void = listener;
+            const wrapped: EventListener = (ev: Event) => {
                 // Browser WebSocket wraps binary data in MessageEvent
                 if (
                     ev instanceof MessageEvent &&
                     ev.data instanceof ArrayBuffer
                 ) {
-                    (listener as unknown as (data: Uint8Array) => void)(
-                        new Uint8Array(ev.data),
-                    );
+                    typedListener(new Uint8Array(ev.data));
                 }
             };
+            this.messageListeners.set(typedListener, wrapped);
+            this.ws.addEventListener(event, wrapped);
         } else if (event === "error") {
-            wrapped = (ev: Event) => {
-                (listener as unknown as (error: Error) => void)(
+            const typedListener: (error: Error) => void = listener;
+            const wrapped: EventListener = (ev: Event) => {
+                typedListener(
                     ev instanceof Error ? ev : new Error("WebSocket error"),
                 );
             };
+            this.errorListeners.set(typedListener, wrapped);
+            this.ws.addEventListener(event, wrapped);
         } else {
             // "open" | "close"
-            wrapped = () => {
-                (listener as unknown as () => void)();
+            const typedListener: () => void = listener;
+            const wrapped: EventListener = () => {
+                typedListener();
             };
+            this.lifecycleListeners.set(typedListener, wrapped);
+            this.ws.addEventListener(event, wrapped);
         }
-
-        this.wrappedListeners.set(listener, wrapped);
-        this.ws.addEventListener(event, wrapped);
     }
-    /* eslint-enable @typescript-eslint/no-unsafe-type-assertion */
 
     send(data: Uint8Array) {
         this.ws.send(data);
