@@ -512,23 +512,21 @@ export class SqliteStorage extends EventEmitter implements Storage {
         const saved: PreKeysSQL[] = [];
 
         for (const preKey of preKeys) {
-            // Use RETURNING to get the autoincrement index in the same statement.
-            // Portable across all SQLite dialects (SQLite 3.35+).
-            const row = await this.db
+            const pubHex = XUtils.encodeHex(preKey.keyPair.publicKey);
+            await this.db
                 .insertInto(table)
                 .values({
                     privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
-                    publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
+                    publicKey: pubHex,
                     signature: XUtils.encodeHex(preKey.signature),
                 })
-                .returning([
-                    "deviceID",
-                    "index",
-                    "keyID",
-                    "publicKey",
-                    "signature",
-                    "userID",
-                ])
+                .execute();
+
+            // Query back by publicKey (unique per insert) to get the DB-assigned index
+            const row = await this.db
+                .selectFrom(table)
+                .selectAll()
+                .where("publicKey", "=", pubHex)
                 .executeTakeFirstOrThrow();
 
             saved.push({
