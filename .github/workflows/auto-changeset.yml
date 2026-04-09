@@ -15,17 +15,17 @@ jobs:
             pull-requests: write
         steps:
             - name: Harden Runner
-              uses: step-security/harden-runner@v2
+              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176  # v2.17.0
               with:
                   egress-policy: audit
 
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
               with:
                   fetch-depth: 0
                   ref: ${{ github.head_ref }}
 
-            - uses: pnpm/action-setup@v4
-            - uses: actions/setup-node@v4
+            - uses: pnpm/action-setup@b307475762933b98ed359c036b0e51f26b63b74b  # v5.0.0
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
               with:
                   node-version: 24
                   cache: npm
@@ -43,7 +43,7 @@ jobs:
 
             - name: Generate changeset with Claude
               if: steps.check.outputs.exists == 'false'
-              uses: anthropics/claude-code-action@v1
+              uses: anthropics/claude-code-action@21302532c2959a4f8f5e445004f617ef8b7b1dd7  # v1
               with:
                   anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
                   prompt: |
