@@ -7,7 +7,7 @@
 
 import type { ClientOptions, Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
-import type { ClientAdapters } from "../../transport/types.js";
+import type { Logger } from "../../transport/types.js";
 
 import { Client } from "../../index.js";
 
@@ -15,7 +15,7 @@ import { testFile, testImage } from "./fixtures.js";
 
 export function platformSuite(
     platformName: string,
-    makeAdapters: () => ClientAdapters,
+    logger: Logger,
     makeStorage: (SK: string, opts: ClientOptions) => Promise<Storage>,
 ) {
     describe.sequential(`platform: ${platformName}`, () => {
@@ -26,9 +26,9 @@ export function platformSuite(
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
             const opts: ClientOptions = {
-                adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
+                logger,
                 logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
@@ -49,8 +49,8 @@ export function platformSuite(
         });
 
         test("login", async () => {
-            const err = await client.login(username, password);
-            expect(err).toBeFalsy();
+            const result = await client.login(username, password);
+            expect(result.ok).toBe(true);
         });
 
         test("connect (websocket auth)", async () => {

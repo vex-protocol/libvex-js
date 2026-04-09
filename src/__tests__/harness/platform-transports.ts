@@ -1,11 +1,9 @@
 /**
  * Test logger for integration tests.
- * WebSocket uses the native global via WebSocketAdapter internally.
  */
-
 import type { Logger } from "../../transport/types.js";
 
-const testLogger: Logger = {
+export const testLogger: Logger = {
     debug(_m: string) {},
     error(m: string) {
         console.error(`[test] ${m}`);
@@ -17,11 +15,3 @@ const testLogger: Logger = {
         console.warn(`[test] ${m}`);
     },
 };
-
-export function browserTestLogger(): Logger {
-    return testLogger;
-}
-
-export function nodeTestLogger(): Logger {
-    return testLogger;
-}
