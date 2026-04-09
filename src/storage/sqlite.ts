@@ -513,31 +513,17 @@ export class SqliteStorage extends EventEmitter implements Storage {
         const saved: PreKeysSQL[] = [];
 
         for (const preKey of preKeys) {
-            const pubHex = XUtils.encodeHex(preKey.keyPair.publicKey);
-            await this.db
+            const row = await this.db
                 .insertInto(table)
                 .values({
                     privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
-                    publicKey: pubHex,
+                    publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
                 })
-                .execute();
-
-            // Query back by publicKey (unique per insert) to get the DB-assigned index
-            const row = await this.db
-                .selectFrom(table)
-                .selectAll()
-                .where("publicKey", "=", pubHex)
+                .returning(["deviceID", "index", "keyID", "publicKey", "signature", "userID"])
                 .executeTakeFirstOrThrow();
 
-            saved.push({
-                deviceID: row.deviceID,
-                index: row.index,
-                keyID: row.keyID,
-                publicKey: row.publicKey,
-                signature: row.signature,
-                userID: row.userID,
-            });
+            saved.push(row);
         }
 
         return saved;
