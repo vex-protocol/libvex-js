@@ -1947,13 +1947,13 @@ export class Client extends EventEmitter {
                     this.getDevice().deviceID +
                     "/mail",
             );
-            const inbox: Array<[Uint8Array, MailWS, Date]> = msgpack
+            const inbox: Array<[Uint8Array, MailWS, string]> = msgpack
                 .decode(new Uint8Array(res.data))
                 .sort(
                     (
-                        a: [Uint8Array, MailWS, Date],
-                        b: [Uint8Array, MailWS, Date],
-                    ) => b[2].getTime() - a[2].getTime(),
+                        a: [Uint8Array, MailWS, string],
+                        b: [Uint8Array, MailWS, string],
+                    ) => b[2].localeCompare(a[2]),
                 );
 
             for (const mailDetails of inbox) {

@@ -2,10 +2,10 @@
  * Pre-built codec instances for every HTTP response type.
  *
  * Usage: import { UserCodec } from "./codecs.js";
- *        const data = UserCodec.decodeSafe(new Uint8Array(res.data));
+ *        const data = decodeAxios(UserCodec, res.data);
  *
- * decodeSafe() validates with Zod at runtime and returns a typed result.
- * No more `any` from msgpack.decode().
+ * decode() returns typed data without runtime validation (SDK trusts server).
+ * For trust boundary validation, use codec.decodeSafe() directly.
  */
 import { z } from "zod/v4";
 
@@ -83,11 +83,12 @@ export const OtkCountCodec = createCodec(
 
 /**
  * Decode an axios arraybuffer response with a typed codec.
- * Replaces: `msgpack.decode(new Uint8Array(res.data))`
+ * Uses decode (typed but not validated) — SDK trusts its own server.
+ * For trust boundary validation (Spire), use decodeSafe() directly.
  */
 export function decodeAxios<T>(
-    codec: { decodeSafe: (data: Uint8Array) => T },
+    codec: { decode: (data: Uint8Array) => T },
     data: ArrayBuffer,
 ): T {
-    return codec.decodeSafe(new Uint8Array(data));
+    return codec.decode(new Uint8Array(data));
 }
