@@ -525,11 +525,24 @@ export class SqliteStorage extends EventEmitter implements Storage {
             }
         }
 
-        const rows = await this.db
-            .selectFrom(table)
-            .selectAll()
-            .where("index", "in", addedIndexes)
-            .execute();
+        let rows;
+        if (addedIndexes.length > 0) {
+            rows = await this.db
+                .selectFrom(table)
+                .selectAll()
+                .where("index", "in", addedIndexes)
+                .execute();
+        } else {
+            // Fallback for dialects that don't return insertId (e.g. Tauri SQLite).
+            // Query the last N rows by descending index.
+            rows = await this.db
+                .selectFrom(table)
+                .selectAll()
+                .orderBy("index", "desc")
+                .limit(preKeys.length)
+                .execute();
+            rows.reverse();
+        }
 
         return rows.map(
             (row): PreKeysSQL => ({
