@@ -2233,7 +2233,11 @@ export class Client extends EventEmitter<ClientEvents> {
         if (!preKeys) {
             this.log.warn("No prekeys found in database, creating a new one.");
             preKeys = this.createPreKey();
-            await this.database.savePreKeys([preKeys], false);
+            const saved = await this.database.savePreKeys([preKeys], false);
+            // Update with the DB-assigned index (autoincrement)
+            if (saved[0]?.index != null) {
+                preKeys = { ...preKeys, index: saved[0].index };
+            }
         }
 
         const sessions = await this.database.getAllSessions();
