@@ -2,8 +2,8 @@
  * Type-safe codec factory for msgpack encode/decode with optional Zod validation.
  *
  * Usage:
- *   import { mailWS } from "@vex-chat/types";
- *   const MailCodec = createCodec(mailWS);
+ *   import { MailWSSchema } from "@vex-chat/types";
+ *   const MailCodec = createCodec(MailWSSchema);
  *
  *   // SDK/Apps (trusted internal) — fast, typed, no Zod overhead:
  *   const msg = MailCodec.decode(data);

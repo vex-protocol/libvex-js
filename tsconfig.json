@@ -13,15 +13,19 @@
         "rootDir": "./src",
 
         "strict": true,
-        "useUnknownInCatchVariables": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noPropertyAccessFromIndexSignature": true,
         "noImplicitReturns": true,
         "noImplicitOverride": true,
         "noFallthroughCasesInSwitch": true,
         "allowUnusedLabels": false,
         "allowUnreachableCode": false,
+        "noUncheckedSideEffectImports": true,
 
         "isolatedModules": true,
         "verbatimModuleSyntax": true,
+        "erasableSyntaxOnly": true,
         "forceConsistentCasingInFileNames": true,
 
         "resolveJsonModule": true,

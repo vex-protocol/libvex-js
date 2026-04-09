@@ -137,6 +137,7 @@ export function platformSuite(
                 );
                 expect(channels.length).toBeGreaterThan(0);
                 const channel = channels[0];
+                if (!channel) throw new Error("No channel found");
 
                 // user1 creates invite, user2 redeems it
                 const invite = await client.invites.create(
@@ -392,7 +393,7 @@ export function platformSuite(
 function apiUrlOverrideFromEnv():
     | Pick<ClientOptions, "host" | "unsafeHttp">
     | undefined {
-    const raw = process.env.API_URL?.trim();
+    const raw = process.env["API_URL"]?.trim();
     if (!raw) return undefined;
     if (/^https?:\/\//i.test(raw)) {
         const u = new URL(raw);

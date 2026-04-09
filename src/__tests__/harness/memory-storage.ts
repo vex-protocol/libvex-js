@@ -1,9 +1,17 @@
 import type { Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
-import type { IPreKeysCrypto, ISessionCrypto } from "../../types/index.js";
+import type { PreKeysCrypto, SessionCrypto } from "../../types/index.js";
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 
-import { XKeyConvert, XUtils } from "@vex-chat/crypto";
+import {
+    type KeyPair,
+    xBoxKeyPairFromSecret,
+    XKeyConvert,
+    xSecretbox,
+    xSecretboxOpen,
+    xSignKeyPairFromSecret,
+    XUtils,
+} from "@vex-chat/crypto";
 
 /**
  * Minimal in-memory Storage for browser/RN platform tests.
@@ -12,12 +20,11 @@ import { XKeyConvert, XUtils } from "@vex-chat/crypto";
  * No persistence — just enough for the register/login/connect/DM test flow.
  */
 import { EventEmitter } from "eventemitter3";
-import nacl from "tweetnacl";
 
 export class MemoryStorage extends EventEmitter implements Storage {
     public ready = false;
     private readonly devices: Device[] = [];
-    private readonly idKeys: nacl.BoxKeyPair;
+    private readonly idKeys: KeyPair;
     private messages: Message[] = [];
     private nextOtkIndex = 1;
     private nextPreKeyIndex = 1;
@@ -28,7 +35,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
     constructor(SK: string) {
         super();
         const idKeys = XKeyConvert.convertKeyPair(
-            nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(SK)),
+            xSignKeyPairFromSecret(XUtils.decodeHex(SK)),
         );
         if (!idKeys) throw new Error("Can't convert SK!");
         this.idKeys = idKeys;
@@ -97,31 +104,27 @@ export class MemoryStorage extends EventEmitter implements Storage {
         );
     }
 
-    getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
+    getOneTimeKey(index: number): Promise<null | PreKeysCrypto> {
         const otk = this.oneTimeKeys.find((k) => k.index === index);
         if (!otk || !otk.privateKey) return Promise.resolve(null);
         return Promise.resolve({
             index: otk.index,
-            keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(otk.privateKey),
-            ),
+            keyPair: xBoxKeyPairFromSecret(XUtils.decodeHex(otk.privateKey)),
             signature: XUtils.decodeHex(otk.signature),
         });
     }
 
-    getPreKeys(): Promise<IPreKeysCrypto | null> {
+    getPreKeys(): Promise<null | PreKeysCrypto> {
         if (this.preKeys.length === 0) return Promise.resolve(null);
         const pk = this.preKeys[0];
         if (!pk.privateKey) return Promise.resolve(null);
         return Promise.resolve({
-            keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(pk.privateKey),
-            ),
+            keyPair: xBoxKeyPairFromSecret(XUtils.decodeHex(pk.privateKey)),
             signature: XUtils.decodeHex(pk.signature),
         });
     }
 
-    getSessionByDeviceID(deviceID: string): Promise<ISessionCrypto | null> {
+    getSessionByDeviceID(deviceID: string): Promise<null | SessionCrypto> {
         const s = this.sessions.find((s) => s.deviceID === deviceID);
         if (!s) return Promise.resolve(null);
         return Promise.resolve(this.sqlToCrypto(s));
@@ -129,7 +132,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
 
     getSessionByPublicKey(
         publicKey: Uint8Array,
-    ): Promise<ISessionCrypto | null> {
+    ): Promise<null | SessionCrypto> {
         const hex = XUtils.encodeHex(publicKey);
         const s = this.sessions.find((s) => s.publicKey === hex);
         if (!s) return Promise.resolve(null);
@@ -177,7 +180,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
     saveMessage(message: Message): Promise<void> {
         const copy = { ...message };
         copy.message = XUtils.encodeHex(
-            nacl.secretbox(
+            xSecretbox(
                 XUtils.decodeUTF8(message.message),
                 XUtils.decodeHex(message.nonce),
                 this.idKeys.secretKey,
@@ -188,7 +191,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
     }
 
     savePreKeys(
-        preKeys: IPreKeysCrypto[],
+        preKeys: PreKeysCrypto[],
         oneTime: boolean,
     ): Promise<PreKeysSQL[]> {
         const added: PreKeysSQL[] = [];
@@ -222,7 +225,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
     private decryptMessage(msg: Message): Message {
         const copy = { ...msg };
         if (copy.decrypted) {
-            const dec = nacl.secretbox.open(
+            const dec = xSecretboxOpen(
                 XUtils.decodeHex(copy.message),
                 XUtils.decodeHex(copy.nonce),
                 this.idKeys.secretKey,
@@ -232,7 +235,7 @@ export class MemoryStorage extends EventEmitter implements Storage {
         return copy;
     }
 
-    private sqlToCrypto(s: SessionSQL): ISessionCrypto {
+    private sqlToCrypto(s: SessionSQL): SessionCrypto {
         return {
             fingerprint: XUtils.decodeHex(s.fingerprint),
             lastUsed: s.lastUsed,

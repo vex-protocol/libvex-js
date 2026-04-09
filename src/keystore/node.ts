@@ -42,8 +42,10 @@ export class NodeKeyStore implements KeyStore {
                 }))
                 .sort((a, b) => b.mtime - a.mtime);
             if (files.length === 0) return Promise.resolve(null);
+            const newest = files[0];
+            if (!newest) return Promise.resolve(null);
             return Promise.resolve(
-                this.readFile(path.join(this.dir, files[0].name)),
+                this.readFile(path.join(this.dir, newest.name)),
             );
         } catch {
             return Promise.resolve(null);

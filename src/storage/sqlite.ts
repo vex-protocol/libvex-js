@@ -1,7 +1,7 @@
 import type { Message } from "../index.js";
 import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
-import type { IPreKeysCrypto, ISessionCrypto } from "../types/index.js";
+import type { PreKeysCrypto, SessionCrypto } from "../types/index.js";
 import type {
     ClientDatabase,
     DeviceRow,
@@ -21,16 +21,23 @@ import type { Kysely } from "kysely";
  * This replaces three separate storage classes (Storage.ts, TauriStorage,
  * ExpoStorage) with a single implementation.
  */
-import { XKeyConvert, XUtils } from "@vex-chat/crypto";
+import {
+    type KeyPair,
+    xBoxKeyPairFromSecret,
+    XKeyConvert,
+    xSecretbox,
+    xSecretboxOpen,
+    xSignKeyPairFromSecret,
+    XUtils,
+} from "@vex-chat/crypto";
 
 import { EventEmitter } from "eventemitter3";
-import nacl from "tweetnacl";
 
 export class SqliteStorage extends EventEmitter implements Storage {
     public ready = false;
     private closing = false;
     private readonly db: Kysely<ClientDatabase>;
-    private readonly idKeys: nacl.BoxKeyPair;
+    private readonly idKeys: KeyPair;
     private readonly log: Logger;
 
     constructor(db: Kysely<ClientDatabase>, SK: string, logger: Logger) {
@@ -39,7 +46,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         this.log = logger;
 
         const idKeys = XKeyConvert.convertKeyPair(
-            nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(SK)),
+            xSignKeyPairFromSecret(XUtils.decodeHex(SK)),
         );
         if (!idKeys) {
             throw new Error("Can't convert SK!");
@@ -125,10 +132,11 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .where("deviceID", "=", deviceID)
             .execute();
 
-        if (rows.length === 0) {
+        const row = rows[0];
+        if (!row) {
             return null;
         }
-        return this.deviceRowToDevice(rows[0]);
+        return this.deviceRowToDevice(row);
     }
 
     async getGroupHistory(channelID: string): Promise<Message[]> {
@@ -182,7 +190,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
     // ── Sessions ─────────────────────────────────────────────────────────────
 
-    async getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
+    async getOneTimeKey(index: number): Promise<null | PreKeysCrypto> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
@@ -197,22 +205,21 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .where("index", "=", index)
             .execute();
 
-        if (rows.length === 0) {
+        const otkInfo = rows[0];
+        if (!otkInfo) {
             this.log.debug("getOneTimeKey() => " + JSON.stringify(null));
             return null;
         }
-
-        const otkInfo = rows[0];
         return {
             index: otkInfo.index,
-            keyPair: nacl.box.keyPair.fromSecretKey(
+            keyPair: xBoxKeyPairFromSecret(
                 XUtils.decodeHex(otkInfo.privateKey),
             ),
             signature: XUtils.decodeHex(otkInfo.signature),
         };
     }
 
-    async getPreKeys(): Promise<IPreKeysCrypto | null> {
+    async getPreKeys(): Promise<null | PreKeysCrypto> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
@@ -223,14 +230,13 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
         const rows = await this.db.selectFrom("preKeys").selectAll().execute();
 
-        if (rows.length === 0) {
+        const preKeyInfo = rows[0];
+        if (!preKeyInfo) {
             this.log.debug("getPreKeys() => " + JSON.stringify(null));
             return null;
         }
-
-        const preKeyInfo = rows[0];
         return {
-            keyPair: nacl.box.keyPair.fromSecretKey(
+            keyPair: xBoxKeyPairFromSecret(
                 XUtils.decodeHex(preKeyInfo.privateKey),
             ),
             signature: XUtils.decodeHex(preKeyInfo.signature),
@@ -239,7 +245,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
     async getSessionByDeviceID(
         deviceID: string,
-    ): Promise<ISessionCrypto | null> {
+    ): Promise<null | SessionCrypto> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getSessionByDeviceID() will not complete.",
@@ -254,17 +260,18 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .limit(1)
             .execute();
 
-        if (rows.length === 0) {
+        const sessionRow = rows[0];
+        if (!sessionRow) {
             this.log.debug("getSession() => " + JSON.stringify(null));
             return null;
         }
 
-        return this.sqlToCrypto(this.sessionRowToSQL(rows[0]));
+        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
     }
 
     async getSessionByPublicKey(
         publicKey: Uint8Array,
-    ): Promise<ISessionCrypto | null> {
+    ): Promise<null | SessionCrypto> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getSessionByPublicKey() will not complete.",
@@ -280,14 +287,15 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .limit(1)
             .execute();
 
-        if (rows.length === 0) {
+        const sessionRow = rows[0];
+        if (!sessionRow) {
             this.log.warn(
                 `getSessionByPublicKey(${hex}) => ${JSON.stringify(null)}`,
             );
             return null;
         }
 
-        return this.sqlToCrypto(this.sessionRowToSQL(rows[0]));
+        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
     }
 
     async init(): Promise<void> {
@@ -365,7 +373,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
             this.ready = true;
             this.emit("ready");
-        } catch (err) {
+        } catch (err: unknown) {
             this.emit(
                 "error",
                 err instanceof Error ? err : new Error(String(err)),
@@ -433,7 +441,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     signKey: device.signKey,
                 })
                 .execute();
-        } catch (err) {
+        } catch (err: unknown) {
             if (this.isDuplicateError(err)) {
                 this.log.warn("Attempted to insert duplicate deviceID");
             } else {
@@ -454,7 +462,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
         // Encrypt plaintext with our idkey before saving to disk
         const encryptedMessage = XUtils.encodeHex(
-            nacl.secretbox(
+            xSecretbox(
                 XUtils.decodeUTF8(message.message),
                 XUtils.decodeHex(message.nonce),
                 this.idKeys.secretKey,
@@ -479,7 +487,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     timestamp: message.timestamp,
                 })
                 .execute();
-        } catch (err) {
+        } catch (err: unknown) {
             if (this.isDuplicateError(err)) {
                 this.log.warn("Duplicate nonce in message table.");
             } else {
@@ -489,7 +497,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
     }
 
     async savePreKeys(
-        preKeys: IPreKeysCrypto[],
+        preKeys: PreKeysCrypto[],
         oneTime: boolean,
     ): Promise<PreKeysSQL[]> {
         await this.untilReady();
@@ -559,7 +567,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     verified: session.verified ? 1 : 0,
                 })
                 .execute();
-        } catch (err) {
+        } catch (err: unknown) {
             if (this.isDuplicateError(err)) {
                 this.log.warn("Attempted to insert duplicate SK");
             } else {
@@ -576,7 +584,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             let plaintext = msg.message;
 
             if (decryptedFlag) {
-                const decrypted = nacl.secretbox.open(
+                const decrypted = xSecretboxOpen(
                     XUtils.decodeHex(msg.message),
                     XUtils.decodeHex(msg.nonce),
                     this.idKeys.secretKey,
@@ -643,7 +651,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         };
     }
 
-    private sqlToCrypto(session: SessionSQL): ISessionCrypto {
+    private sqlToCrypto(session: SessionSQL): SessionCrypto {
         return {
             fingerprint: XUtils.decodeHex(session.fingerprint),
             lastUsed: session.lastUsed,

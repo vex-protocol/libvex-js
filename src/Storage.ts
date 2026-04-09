@@ -1,5 +1,5 @@
 import type { Message, Session } from "./index.js";
-import type { IPreKeysCrypto, ISessionCrypto } from "./types/index.js";
+import type { PreKeysCrypto, SessionCrypto } from "./types/index.js";
 import type { Device, PreKeysSQL } from "@vex-chat/types";
 import type { EventEmitter } from "eventemitter3";
 /**
@@ -43,17 +43,17 @@ export interface Storage extends EventEmitter {
      */
     getMessageHistory: (userID: string) => Promise<Message[]>;
     /** Fetches one one-time key by index. */
-    getOneTimeKey: (index: number) => Promise<IPreKeysCrypto | null>;
+    getOneTimeKey: (index: number) => Promise<null | PreKeysCrypto>;
     /**
      * Returns the local signed prekey pair, or `null` when it has not been created yet.
      */
-    getPreKeys: () => Promise<IPreKeysCrypto | null>;
+    getPreKeys: () => Promise<null | PreKeysCrypto>;
     /** Returns the active session for a device ID (typically the most recently used). */
-    getSessionByDeviceID: (deviceID: string) => Promise<ISessionCrypto | null>;
+    getSessionByDeviceID: (deviceID: string) => Promise<null | SessionCrypto>;
     /** Fetches an encryption session using the session public key bytes. */
     getSessionByPublicKey: (
         publicKey: Uint8Array,
-    ) => Promise<ISessionCrypto | null>;
+    ) => Promise<null | SessionCrypto>;
     /**
      * Performs storage initialization (schema creation, migrations, warmup, etc.).
      *
@@ -108,7 +108,7 @@ export interface Storage extends EventEmitter {
      * @param oneTime `true` for one-time keys, `false` for the long-lived signed prekey.
      */
     savePreKeys: (
-        preKeys: IPreKeysCrypto[],
+        preKeys: PreKeysCrypto[],
         oneTime: boolean,
     ) => Promise<PreKeysSQL[]>;
     /** Persists an encryption session. */

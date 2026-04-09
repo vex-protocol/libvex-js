@@ -19,7 +19,7 @@ export class MemoryKeyStore implements KeyStore {
         // Return the most recently saved credentials
         const entries = [...this.store.values()];
         return Promise.resolve(
-            entries.length > 0 ? entries[entries.length - 1] : null,
+            entries.length > 0 ? (entries[entries.length - 1] ?? null) : null,
         );
     }
 

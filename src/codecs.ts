@@ -8,16 +8,16 @@
  * For trust boundary validation, use codec.decodeSafe() directly.
  */
 import {
-    actionToken,
-    channel,
-    device,
-    emoji,
-    fileSQL,
-    invite,
-    keyBundle,
-    permission,
-    server,
-    user,
+    ActionTokenSchema,
+    ChannelSchema,
+    DeviceSchema,
+    EmojiSchema,
+    FileSQLSchema,
+    InviteSchema,
+    KeyBundleSchema,
+    PermissionSchema,
+    ServerSchema,
+    UserSchema,
 } from "@vex-chat/types";
 
 import { z } from "zod/v4";
@@ -26,26 +26,26 @@ import { createCodec } from "./codec.js";
 
 // ── Named schema codecs ─────────────────────────────────────────────────────
 
-export const UserCodec = createCodec(user);
-export const DeviceCodec = createCodec(device);
-export const ServerCodec = createCodec(server);
-export const ChannelCodec = createCodec(channel);
-export const PermissionCodec = createCodec(permission);
-export const InviteCodec = createCodec(invite);
-export const EmojiCodec = createCodec(emoji);
-export const FileSQLCodec = createCodec(fileSQL);
-export const ActionTokenCodec = createCodec(actionToken);
-export const KeyBundleCodec = createCodec(keyBundle);
+export const UserCodec = createCodec(UserSchema);
+export const DeviceCodec = createCodec(DeviceSchema);
+export const ServerCodec = createCodec(ServerSchema);
+export const ChannelCodec = createCodec(ChannelSchema);
+export const PermissionCodec = createCodec(PermissionSchema);
+export const InviteCodec = createCodec(InviteSchema);
+export const EmojiCodec = createCodec(EmojiSchema);
+export const FileSQLCodec = createCodec(FileSQLSchema);
+export const ActionTokenCodec = createCodec(ActionTokenSchema);
+export const KeyBundleCodec = createCodec(KeyBundleSchema);
 
 // ── Array codecs ────────────────────────────────────────────────────────────
 
-export const UserArrayCodec = createCodec(z.array(user));
-export const DeviceArrayCodec = createCodec(z.array(device));
-export const ServerArrayCodec = createCodec(z.array(server));
-export const ChannelArrayCodec = createCodec(z.array(channel));
-export const PermissionArrayCodec = createCodec(z.array(permission));
-export const InviteArrayCodec = createCodec(z.array(invite));
-export const EmojiArrayCodec = createCodec(z.array(emoji));
+export const UserArrayCodec = createCodec(z.array(UserSchema));
+export const DeviceArrayCodec = createCodec(z.array(DeviceSchema));
+export const ServerArrayCodec = createCodec(z.array(ServerSchema));
+export const ChannelArrayCodec = createCodec(z.array(ChannelSchema));
+export const PermissionArrayCodec = createCodec(z.array(PermissionSchema));
+export const InviteArrayCodec = createCodec(z.array(InviteSchema));
+export const EmojiArrayCodec = createCodec(z.array(EmojiSchema));
 
 // ── Inline ad-hoc response codecs ───────────────────────────────────────────
 
@@ -56,7 +56,7 @@ export const ConnectResponseCodec = createCodec(
 export const AuthResponseCodec = createCodec(
     z.object({
         token: z.string(),
-        user,
+        user: UserSchema,
     }),
 );
 
@@ -71,7 +71,7 @@ export const WhoamiCodec = createCodec(
     z.object({
         exp: z.number(),
         token: z.string(),
-        user,
+        user: UserSchema,
     }),
 );
 

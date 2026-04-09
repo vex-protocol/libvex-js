@@ -23,7 +23,7 @@ export function createLogger(logName: string, logLevel?: string) {
         ],
     });
     // Also log to console outside production.
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env["NODE_ENV"] !== "production") {
         logger.add(
             new winston.transports.Console({
                 format: winston.format.combine(
