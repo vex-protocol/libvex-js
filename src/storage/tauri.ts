@@ -19,13 +19,11 @@ export async function createTauriStorage(
 ): Promise<Storage> {
     const { TauriSqliteDialect } = await import("kysely-dialect-tauri");
     const { default: Database } = await import("@tauri-apps/plugin-sql");
-    /* eslint-disable @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- Kysely does not export its Dialect interface; TauriSqliteDialect implements it at runtime */
     const db = new Kysely<ClientDatabase>({
         dialect: new TauriSqliteDialect({
             database: () => Database.load(`sqlite:${dbName}`),
-        }) as any,
+        }),
     });
-    /* eslint-enable @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
     const storage = new SqliteStorage(db, SK, logger);
     await storage.init();
     return storage;
