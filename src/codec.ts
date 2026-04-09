@@ -28,8 +28,7 @@ export function createCodec<T extends z.ZodType>(schema: T) {
     type Msg = z.infer<T>;
     return {
         /** Decode msgpack data — typed but not validated. Fast path for SDK. */
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- intentional: fast path trusts server
-        decode: (data: Uint8Array): Msg => decode(data) as Msg,
+        decode: (data: Uint8Array): Msg => schema.parse(decode(data)) as Msg,
 
         /** Decode + validate with Zod. Safe path for trust boundaries (Spire). */
         decodeSafe: (data: Uint8Array): Msg =>

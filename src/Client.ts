@@ -33,7 +33,6 @@ import type {
     RespMsg,
     Server,
     SessionSQL,
-    SuccessMsg,
 } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
 
@@ -49,7 +48,12 @@ import {
     xMnemonic,
     XUtils,
 } from "@vex-chat/crypto";
-import { MailType } from "@vex-chat/types";
+import {
+    MailType,
+    mailWS,
+    permission as permissionSchema,
+    wsMessage,
+} from "@vex-chat/types";
 
 import { sleep } from "@extrahash/sleep";
 import axios, { type AxiosError, isAxiosError } from "axios";
@@ -58,6 +62,7 @@ import objectHash from "object-hash";
 import pc from "picocolors";
 import nacl from "tweetnacl";
 import * as uuid from "uuid";
+import { z } from "zod/v4";
 
 import { msgpack } from "./codec.js";
 import {
@@ -330,6 +335,29 @@ export interface Message {
     /** Time the message was created/received. */
     timestamp: string;
 }
+
+/** Zod schema matching the {@link Message} interface for forwarded-message decode. */
+const messageSchema: z.ZodType<Message> = z.object({
+    authorID: z.string(),
+    decrypted: z.boolean(),
+    direction: z.enum(["incoming", "outgoing"]),
+    forward: z.boolean(),
+    group: z.string().nullable(),
+    mailID: z.string(),
+    message: z.string(),
+    nonce: z.string(),
+    readerID: z.string(),
+    recipient: z.string(),
+    sender: z.string(),
+    timestamp: z.string(),
+});
+
+/** Zod schema for a single inbox entry from getMail: [header, mailBody, timestamp]. */
+const mailInboxEntry = z.tuple([
+    z.custom<Uint8Array>((val) => val instanceof Uint8Array),
+    mailWS,
+    z.string(),
+]);
 
 /**
  * @ignore
@@ -1604,8 +1632,7 @@ export class Client extends EventEmitter<ClientEvents> {
 
         // emit the message
         const forwardedMsg = forward
-            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
-              (msgpack.decode(message) as Message)
+            ? messageSchema.parse(msgpack.decode(message))
             : null;
         const emitMsg: Message = forwardedMsg
             ? { ...forwardedMsg, forward: true }
@@ -1631,9 +1658,9 @@ export class Client extends EventEmitter<ClientEvents> {
                 const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
-                    if (receivedMsg.type === "success") {
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- narrowed by type check
-                        res((receivedMsg as SuccessMsg).data);
+                    const parsed = wsMessage.safeParse(receivedMsg);
+                    if (parsed.success && parsed.data.type === "success") {
+                        res(parsed.data.data);
                     } else {
                         rej(
                             new Error(
@@ -1847,10 +1874,9 @@ export class Client extends EventEmitter<ClientEvents> {
                     "/mail",
             );
             const mailBuffer = new Uint8Array(res.data);
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack payload trusted from server
-            const rawInbox = msgpack.decode(mailBuffer) as Array<
-                [Uint8Array, MailWS, string]
-            >;
+            const rawInbox = z
+                .array(mailInboxEntry)
+                .parse(msgpack.decode(mailBuffer));
             const inbox = rawInbox.sort((a, b) => b[2].localeCompare(a[2]));
 
             for (const mailDetails of inbox) {
@@ -2011,8 +2037,7 @@ export class Client extends EventEmitter<ClientEvents> {
                 this.fetchingMail = false;
                 break;
             case "permission":
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- narrowed by event name
-                this.emit("permission", msg.data as Permission);
+                this.emit("permission", permissionSchema.parse(msg.data));
                 break;
             case "retryRequest":
                 // msg.data is the messageID for retry
@@ -2083,27 +2108,32 @@ export class Client extends EventEmitter<ClientEvents> {
             });
 
             this.conn.on("message", (message: Uint8Array) => {
-                const [header, msg] = XUtils.unpackMessage(message);
+                const [header, raw] = XUtils.unpackMessage(message);
 
                 this.log.debug(
                     pc.red(pc.bold("INH ") + XUtils.encodeHex(header)),
                 );
                 this.log.debug(
-                    pc.red(pc.bold("IN ") + JSON.stringify(msg, null, 4)),
+                    pc.red(pc.bold("IN ") + JSON.stringify(raw, null, 4)),
                 );
+
+                const parseResult = wsMessage.safeParse(raw);
+                if (!parseResult.success) {
+                    this.log.warn("Unknown WS message: " + JSON.stringify(raw));
+                    return;
+                }
+                const msg = parseResult.data;
 
                 switch (msg.type) {
                     case "challenge":
                         this.log.info("Received challenge from server.");
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- narrowed by msg.type check
-                        this.respond(msg as ChallMsg);
+                        this.respond(msg);
                         break;
                     case "error":
                         this.log.warn(JSON.stringify(msg));
                         break;
                     case "notify":
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- narrowed by msg.type check
-                        void this.handleNotify(msg as NotifyMsg);
+                        void this.handleNotify(msg);
                         break;
                     case "ping":
                         this.pong(msg.transmissionID);
@@ -2421,8 +2451,7 @@ export class Client extends EventEmitter<ClientEvents> {
 
                         // emit the message
                         const fwdMsg1 = mail.forward
-                            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
-                              (msgpack.decode(unsealed) as Message)
+                            ? messageSchema.parse(msgpack.decode(unsealed))
                             : null;
                         const message: Message = fwdMsg1
                             ? { ...fwdMsg1, forward: true }
@@ -2558,8 +2587,7 @@ export class Client extends EventEmitter<ClientEvents> {
                         this.log.info("Decryption successful.");
                         // emit the message
                         const fwdMsg2 = mail.forward
-                            ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
-                              (msgpack.decode(decrypted) as Message)
+                            ? messageSchema.parse(msgpack.decode(decrypted))
                             : null;
                         const message: Message = fwdMsg2
                             ? {
@@ -2961,8 +2989,9 @@ export class Client extends EventEmitter<ClientEvents> {
         this.log.info("Mail hash: " + objectHash(mail));
         this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
 
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- msgpack.decode returns unknown; shape trusted from our own encrypt path
-        const fwdOut = forward ? (msgpack.decode(msg) as Message) : null;
+        const fwdOut = forward
+            ? messageSchema.parse(msgpack.decode(msg))
+            : null;
         const outMsg: Message = fwdOut
             ? { ...fwdOut, forward: true }
             : {
@@ -2986,9 +3015,9 @@ export class Client extends EventEmitter<ClientEvents> {
                 const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
-                    if (receivedMsg.type === "success") {
-                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- narrowed by type check
-                        res((receivedMsg as SuccessMsg).data);
+                    const parsed = wsMessage.safeParse(receivedMsg);
+                    if (parsed.success && parsed.data.type === "success") {
+                        res(parsed.data.data);
                     } else {
                         rej(
                             new Error(

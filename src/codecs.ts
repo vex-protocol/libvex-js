@@ -91,6 +91,12 @@ export function decodeAxios<T>(
      */
     data: unknown,
 ): T {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- axios arraybuffer response is ArrayBuffer at runtime
-    return codec.decodeSafe(new Uint8Array(data as ArrayBuffer));
+    // Node: axios returns Buffer (extends Uint8Array). Browser: ArrayBuffer.
+    if (data instanceof Uint8Array) {
+        return codec.decodeSafe(data);
+    }
+    if (data instanceof ArrayBuffer) {
+        return codec.decodeSafe(new Uint8Array(data));
+    }
+    throw new Error("Expected ArrayBuffer or Buffer from axios response");
 }
