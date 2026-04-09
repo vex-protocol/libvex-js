@@ -1,5 +1,5 @@
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
+import type { Storage } from "../Storage.js";
+import type { Logger } from "../transport/types.js";
 import type { ClientDatabase } from "./schema.js";
 
 import BetterSqlite3 from "better-sqlite3";
@@ -14,14 +14,14 @@ import { SqliteStorage } from "./sqlite.js";
 export function createNodeStorage(
     dbPath: string,
     SK: string,
-    logger?: ILogger,
-): IStorage {
+    logger?: Logger,
+): Storage {
     const db = new Kysely<ClientDatabase>({
         dialect: new SqliteDialect({
             database: new BetterSqlite3(dbPath),
         }),
     });
-    const log: ILogger = logger ?? {
+    const log: Logger = logger ?? {
         debug() {},
         error() {},
         info() {},

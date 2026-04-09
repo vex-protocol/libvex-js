@@ -1,21 +1,21 @@
-export interface IClientAdapters {
-    logger: ILogger;
-    WebSocket: IWebSocketCtor;
+export interface ClientAdapters {
+    logger: Logger;
+    WebSocket: WebSocketCtor;
 }
 
-export interface ILogger {
+export interface Logger {
     debug(message: string, ...args: any[]): void;
     error(message: string, ...args: any[]): void;
     info(message: string, ...args: any[]): void;
     warn(message: string, ...args: any[]): void;
 }
 
-export type IWebSocketCtor = new (
+export type WebSocketCtor = new (
     url: string,
     options?: object,
-) => IWebSocketLike;
+) => WebSocketLike;
 
-export interface IWebSocketLike {
+export interface WebSocketLike {
     close(): void;
     off(event: string, listener: (...args: any[]) => void): void;
     on(event: string, listener: (...args: any[]) => void): void;

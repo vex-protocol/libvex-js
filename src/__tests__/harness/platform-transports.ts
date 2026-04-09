@@ -4,14 +4,14 @@
  */
 
 import type {
-    IClientAdapters,
-    ILogger,
-    IWebSocketLike,
+    ClientAdapters,
+    Logger,
+    WebSocketLike,
 } from "../../transport/types.js";
 
 import WebSocket from "ws";
 
-const testLogger: ILogger = {
+const testLogger: Logger = {
     debug(_m: string) {},
     error(m: string) {
         console.error(`[test] ${m}`);
@@ -26,7 +26,7 @@ const testLogger: ILogger = {
 
 // ─── Node: raw ws, delivers Buffer ──────────────────────────────────────────
 
-class BrowserTestWS implements IWebSocketLike {
+class BrowserTestWS implements WebSocketLike {
     onerror: ((err: any) => void) | null = null;
     get readyState() {
         return this.ws.readyState;
@@ -72,7 +72,7 @@ class BrowserTestWS implements IWebSocketLike {
 
 // ─── Browser/Tauri/RN: delivers Uint8Array (simulates browser binary) ───────
 
-class NodeTestWS implements IWebSocketLike {
+class NodeTestWS implements WebSocketLike {
     onerror: ((err: any) => void) | null = null;
     get readyState() {
         return this.ws.readyState;
@@ -103,10 +103,10 @@ class NodeTestWS implements IWebSocketLike {
 
 // ─── Adapter factories ───────────────────────────────────────────────────────
 
-export function browserTestAdapters(): IClientAdapters {
+export function browserTestAdapters(): ClientAdapters {
     return { logger: testLogger, WebSocket: BrowserTestWS as any };
 }
 
-export function nodeTestAdapters(): IClientAdapters {
+export function nodeTestAdapters(): ClientAdapters {
     return { logger: testLogger, WebSocket: NodeTestWS as any };
 }

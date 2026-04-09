@@ -1,4 +1,4 @@
-import type { ILogger } from "../transport/types.js";
+import type { Logger } from "../transport/types.js";
 /**
  * Platform preset for Node.js (CLI tools, bots, tests).
  *
@@ -14,7 +14,7 @@ import type { PlatformPreset } from "./types.js";
 export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
     const { default: WebSocket } = await import("ws");
     const { createLogger } = await import("../utils/createLogger.js");
-    const logger: ILogger = createLogger("libvex", logLevel);
+    const logger: Logger = createLogger("libvex", logLevel);
 
     return {
         adapters: {

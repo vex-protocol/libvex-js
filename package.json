@@ -116,7 +116,7 @@
     "dependencies": {
         "@extrahash/sleep": "^1.0.0",
         "@vex-chat/crypto": "^1.1.1",
-        "@vex-chat/types": "^1.1.0-rc.6",
+        "@vex-chat/types": "^2.0.0-rc.0",
         "axios": "^1.7.0",
         "eventemitter3": "^5.0.4",
         "kysely": "^0.28.15",
@@ -127,7 +127,8 @@
         "tweetnacl": "^1.0.3",
         "uuid": "^8.3.1",
         "winston": "^3.3.3",
-        "ws": "^8.17.0"
+        "ws": "^8.17.0",
+        "zod": "^4.3.6"
     },
     "peerDependencies": {
         "@tauri-apps/plugin-sql": ">=2.0.0",

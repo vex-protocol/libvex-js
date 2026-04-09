@@ -1,10 +1,10 @@
 /**
- * Wraps the browser's native WebSocket to match the IWebSocketLike interface
+ * Wraps the browser's native WebSocket to match the WebSocketLike interface
  * expected by Client. Used by Tauri (webview) and future web builds.
  */
-import type { IWebSocketLike } from "./types.js";
+import type { WebSocketLike } from "./types.js";
 
-export class BrowserWebSocket implements IWebSocketLike {
+export class BrowserWebSocket implements WebSocketLike {
     onerror: ((err: any) => void) | null = null;
     get readyState() {
         return this.ws.readyState;

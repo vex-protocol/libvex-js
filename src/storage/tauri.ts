@@ -1,5 +1,5 @@
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
+import type { Storage } from "../Storage.js";
+import type { Logger } from "../transport/types.js";
 import type { ClientDatabase } from "./schema.js";
 
 /**
@@ -15,8 +15,8 @@ import { SqliteStorage } from "./sqlite.js";
 export async function createTauriStorage(
     dbName: string,
     SK: string,
-    logger: ILogger,
-): Promise<IStorage> {
+    logger: Logger,
+): Promise<Storage> {
     const { TauriSqliteDialect } = await import("kysely-dialect-tauri");
     const { default: Database } = await import("@tauri-apps/plugin-sql");
     const db = new Kysely<ClientDatabase>({

@@ -1,4 +1,4 @@
-import type { IClientOptions } from "../index.js";
+import type { ClientOptions } from "../index.js";
 
 import winston from "winston";
 

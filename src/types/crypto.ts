@@ -14,7 +14,7 @@ export interface IPreKeysCrypto {
 
 export interface ISessionCrypto {
     fingerprint: Uint8Array;
-    lastUsed: Date;
+    lastUsed: string;
     mode: "initiator" | "receiver";
     publicKey: Uint8Array;
     sessionID: string;

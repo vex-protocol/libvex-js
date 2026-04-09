@@ -1,5 +1,5 @@
-import type { ILogger } from "../transport/types.js";
-import type { IWebSocketCtor } from "../transport/types.js";
+import type { Logger } from "../transport/types.js";
+import type { WebSocketCtor } from "../transport/types.js";
 /**
  * Platform preset for tests — no I/O, no platform dependencies.
  *
@@ -9,7 +9,7 @@ import type { IWebSocketCtor } from "../transport/types.js";
  */
 import type { PlatformPreset } from "./types.js";
 
-const logger: ILogger = {
+const logger: Logger = {
     debug() {},
     error(m: string) {
         console.error(`[test] ${m}`);
@@ -22,7 +22,7 @@ const logger: ILogger = {
     },
 };
 
-export function testPreset(WebSocket: IWebSocketCtor): PlatformPreset {
+export function testPreset(WebSocket: WebSocketCtor): PlatformPreset {
     return {
         adapters: {
             logger,

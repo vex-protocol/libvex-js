@@ -1,5 +1,5 @@
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
+import type { Storage } from "../Storage.js";
+import type { Logger } from "../transport/types.js";
 import type { ClientDatabase } from "./schema.js";
 
 /**
@@ -15,8 +15,8 @@ import { SqliteStorage } from "./sqlite.js";
 export async function createExpoStorage(
     dbName: string,
     SK: string,
-    logger: ILogger,
-): Promise<IStorage> {
+    logger: Logger,
+): Promise<Storage> {
     const { ExpoDialect } = await import("kysely-expo");
     const db = new Kysely<ClientDatabase>({
         dialect: new ExpoDialect({ database: dbName }) as any,

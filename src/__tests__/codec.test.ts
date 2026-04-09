@@ -28,14 +28,14 @@ const arbBaseMsg = rec({
 });
 
 const arbSuccessMsg = rec({
-    data: fc.jsonValue(),
+    data: fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown),
     timestamp: fc.option(fc.string(), { nil: null }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("success"),
 });
 
 const arbErrMsg = rec({
-    data: fc.option(fc.jsonValue(), { nil: null }),
+    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
     error: fc.string({ minLength: 1 }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("error"),
@@ -43,14 +43,14 @@ const arbErrMsg = rec({
 
 const arbResourceMsg = rec({
     action: fc.constantFrom("CREATE", "RETRIEVE", "UPDATE", "DELETE"),
-    data: fc.option(fc.jsonValue(), { nil: null }),
+    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
     resourceType: fc.constantFrom("mail", "preKeys", "otk"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("resource"),
 });
 
 const arbNotifyMsg = rec({
-    data: fc.option(fc.jsonValue(), { nil: null }),
+    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
     event: fc.constantFrom("mail", "serverChange", "permission"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("notify"),

@@ -1,40 +1,40 @@
 export { Client } from "./Client.js";
 export type {
-    IChannel,
-    IChannels,
-    IClientOptions,
-    IDevice,
-    IDevices,
-    IEmojis,
-    IFile,
-    IFileProgress,
-    IFileRes,
-    IFiles,
-    IInvites,
-    IKeys,
-    IMe,
-    IMessage,
-    IMessages,
-    IModeration,
-    IPermission,
-    IPermissions,
-    IServer,
-    IServers,
-    ISession,
-    ISessions,
-    IUser,
-    IUsers,
+    Channel,
+    Channels,
+    ClientOptions,
+    Device,
+    Devices,
+    Emojis,
+    VexFile,
+    FileProgress,
+    FileRes,
+    Files,
+    Invites,
+    Keys,
+    Me,
+    Message,
+    Messages,
+    Moderation,
+    Permission,
+    Permissions,
+    Server,
+    Servers,
+    Session,
+    Sessions,
+    User,
+    Users,
 } from "./Client.js";
 export { createCodec, msgpack } from "./codec.js";
-export type { IStorage } from "./IStorage.js";
+export type { Storage } from "./Storage.js";
 
 export type { PlatformPreset } from "./preset/types.js";
 export type {
-    IClientAdapters,
-    ILogger,
-    IWebSocketCtor,
-    IWebSocketLike,
+    ClientAdapters,
+    Logger,
+    WebSocketCtor,
+    WebSocketLike,
 } from "./transport/types.js";
 export type { KeyStore, StoredCredentials } from "./types/index.js";
 // Re-export app-facing types
-export type { IInvite } from "@vex-chat/types";
+export type { Invite } from "@vex-chat/types";

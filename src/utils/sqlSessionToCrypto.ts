@@ -1,9 +1,9 @@
 import type { ISessionCrypto } from "../types/index.js";
-import type { ISessionSQL } from "@vex-chat/types";
+import type { SessionSQL } from "@vex-chat/types";
 
 import { XUtils } from "@vex-chat/crypto";
 
-export function sqlSessionToCrypto(session: ISessionSQL): ISessionCrypto {
+export function sqlSessionToCrypto(session: SessionSQL): ISessionCrypto {
     return {
         fingerprint: XUtils.decodeHex(session.fingerprint),
         lastUsed: session.lastUsed,

@@ -1,4 +1,4 @@
-import type { ILogger } from "../transport/types.js";
+import type { Logger } from "../transport/types.js";
 import type { PlatformPreset } from "./types.js";
 
 /**
@@ -14,7 +14,7 @@ import { Platform } from "react-native";
 
 import { BrowserWebSocket } from "../transport/browser.js";
 
-const logger: ILogger = {
+const logger: Logger = {
     debug(m: string) {
         console.debug(`[vex] ${m}`);
     },

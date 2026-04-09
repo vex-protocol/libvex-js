@@ -1,10 +1,10 @@
 // tslint:disable: no-empty-interface
 
-import type { IStorage } from "./IStorage.js";
+import type { Storage } from "./Storage.js";
 import type {
-    IClientAdapters,
-    ILogger,
-    IWebSocketLike,
+    ClientAdapters,
+    Logger,
+    WebSocketLike,
 } from "./transport/types.js";
 import type {
     IPreKeysCrypto,
@@ -12,28 +12,28 @@ import type {
     IXKeyRing,
 } from "./types/index.js";
 import type {
-    IActionToken,
-    IChallMsg,
-    IChannel,
-    IDevice,
-    IDevicePayload,
-    IEmoji,
-    IFileResponse,
-    IFileSQL,
-    IInvite,
-    IKeyBundle,
-    IMailWS,
-    INotifyMsg,
-    IPermission,
-    IPreKeysSQL,
-    IPreKeysWS,
-    IReceiptMsg,
-    IRegistrationPayload,
-    IResourceMsg,
-    IRespMsg,
-    IServer,
-    ISessionSQL,
-    ISuccessMsg,
+    ActionToken,
+    ChallMsg,
+    Channel,
+    Device,
+    DevicePayload,
+    Emoji,
+    FileResponse,
+    FileSQL,
+    Invite,
+    KeyBundle,
+    MailWS,
+    NotifyMsg,
+    Permission,
+    PreKeysSQL,
+    PreKeysWS,
+    ReceiptMsg,
+    RegistrationPayload,
+    ResourceMsg,
+    RespMsg,
+    Server,
+    SessionSQL,
+    SuccessMsg,
 } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
 
@@ -60,6 +60,31 @@ import nacl from "tweetnacl";
 import * as uuid from "uuid";
 
 import { msgpack } from "./codec.js";
+import {
+    ActionTokenCodec,
+    AuthResponseCodec,
+    ChannelArrayCodec,
+    ChannelCodec,
+    ConnectResponseCodec,
+    decodeAxios,
+    DeviceArrayCodec,
+    DeviceChallengeCodec,
+    DeviceCodec,
+    EmojiArrayCodec,
+    EmojiCodec,
+    FileSQLCodec,
+    InviteArrayCodec,
+    InviteCodec,
+    KeyBundleCodec,
+    OtkCountCodec,
+    PermissionArrayCodec,
+    PermissionCodec,
+    ServerArrayCodec,
+    ServerCodec,
+    UserArrayCodec,
+    UserCodec,
+    WhoamiCodec,
+} from "./codecs.js";
 import { capitalize } from "./utils/capitalize.js";
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
@@ -84,7 +109,7 @@ export declare interface Client {
      */
     on(
         event: "fileProgress",
-        callback: (progress: IFileProgress) => void,
+        callback: (progress: FileProgress) => void,
     ): this;
 
     /**
@@ -137,13 +162,13 @@ export declare interface Client {
      *
      * ```ts
      *
-     *   client.on("message", (msg: IMessage) => {
+     *   client.on("message", (msg: Message) => {
      *       console.log(message);
      *   });
      * ```
      * @event
      */
-    on(event: "message", callback: (message: IMessage) => void): this;
+    on(event: "message", callback: (message: Message) => void): this;
 
     /**
      * This is emitted when the user is granted a new permission.
@@ -152,13 +177,13 @@ export declare interface Client {
      *
      * ```ts
      *
-     *   client.on("permission", (perm: IPermission) => {
+     *   client.on("permission", (perm: Permission) => {
      *       console.log(perm);
      *   });
      * ```
      * @event
      */
-    on(event: "permission", callback: (permission: IPermission) => void): this;
+    on(event: "permission", callback: (permission: Permission) => void): this;
 
     /**
      * This is emitted for a new encryption session being created with
@@ -168,7 +193,7 @@ export declare interface Client {
      *
      * ```ts
      *
-     *   client.on("session", (session: ISession, user: IUser) => {
+     *   client.on("session", (session: Session, user: User) => {
      *       console.log(session);
      *       console.log(user);
      *   });
@@ -177,7 +202,7 @@ export declare interface Client {
      */
     on(
         event: "session",
-        callback: (session: ISession, user: IUser) => void,
+        callback: (session: Session, user: User) => void,
     ): this;
 
     /**
@@ -216,7 +241,7 @@ export declare interface Client {
 }
 
 /**
- * IPermission is a permission to a resource.
+ * Permission is a permission to a resource.
  *
  * Common fields:
  * - `permissionID`: unique permission row ID
@@ -225,22 +250,22 @@ export declare interface Client {
  * - `resourceType`: type string for the resource
  * - `powerLevel`: authorization level
  */
-export type { IPermission } from "@vex-chat/types";
+export type { Permission } from "@vex-chat/types";
 
 /**
  * @ignore
  */
-export interface IChannels {
+export interface Channels {
     /** Creates a channel in a server. */
-    create: (name: string, serverID: string) => Promise<IChannel>;
+    create: (name: string, serverID: string) => Promise<Channel>;
     /** Deletes a channel. */
     delete: (channelID: string) => Promise<void>;
     /** Lists channels in a server. */
-    retrieve: (serverID: string) => Promise<IChannel[]>;
+    retrieve: (serverID: string) => Promise<Channel[]>;
     /** Gets one channel by ID. */
-    retrieveByID: (channelID: string) => Promise<IChannel | null>;
+    retrieveByID: (channelID: string) => Promise<Channel | null>;
     /** Lists users currently visible in a channel. */
-    userList: (channelID: string) => Promise<IUser[]>;
+    userList: (channelID: string) => Promise<User[]>;
 }
 
 /**
@@ -254,14 +279,14 @@ export interface IChannels {
  * - `lastLogin`: last login timestamp string
  * - `deleted`: soft-delete flag
  */
-export type { IDevice } from "@vex-chat/types";
+export type { Device } from "@vex-chat/types";
 
 /**
- * IClientOptions are the options you can pass into the client.
+ * ClientOptions are the options you can pass into the client.
  */
-export interface IClientOptions {
+export interface ClientOptions {
     /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
-    adapters?: IClientAdapters;
+    adapters?: ClientAdapters;
     /** Folder path where the sqlite file is created. */
     dbFolder?: string;
     /** Logging level for storage/database logs. */
@@ -297,53 +322,53 @@ export interface IClientOptions {
 /**
  * @ignore
  */
-export interface IDevices {
+export interface Devices {
     /** Deletes one of the account's devices (except the currently active one). */
     delete: (deviceID: string) => Promise<void>;
     /** Registers the current key material as a new device. */
-    register: () => Promise<IDevice | null>;
+    register: () => Promise<Device | null>;
     /** Fetches one device by ID. */
-    retrieve: (deviceIdentifier: string) => Promise<IDevice | null>;
+    retrieve: (deviceIdentifier: string) => Promise<Device | null>;
 }
 
 /**
- * IChannel is a chat channel on a server.
+ * Channel is a chat channel on a server.
  *
  * Common fields:
  * - `channelID`
  * - `serverID`
  * - `name`
  */
-export type { IChannel } from "@vex-chat/types";
+export type { Channel } from "@vex-chat/types";
 
 /**
- * IServer is a single chat server.
+ * Server is a single chat server.
  *
  * Common fields:
  * - `serverID`
  * - `name`
  * - `icon` (optional URL/data)
  */
-export type { IServer } from "@vex-chat/types";
+export type { Server } from "@vex-chat/types";
 
 /**
  * @ignore
  */
-export interface IEmojis {
+export interface Emojis {
     /** Uploads a custom emoji to a server. */
     create: (
         emoji: Uint8Array,
         name: string,
         serverID: string,
-    ) => Promise<IEmoji | null>;
+    ) => Promise<Emoji | null>;
     /** Fetches one emoji's metadata by ID. */
-    retrieve: (emojiID: string) => Promise<IEmoji | null>;
+    retrieve: (emojiID: string) => Promise<Emoji | null>;
     /** Lists emojis available on a server. */
-    retrieveList: (serverID: string) => Promise<IEmoji[]>;
+    retrieveList: (serverID: string) => Promise<Emoji[]>;
 }
 
 /**
- * IFile is an uploaded encrypted file.
+ * VexFile is an uploaded encrypted file.
  *
  * Common fields:
  * - `fileID`: file identifier
@@ -352,19 +377,19 @@ export interface IEmojis {
  *
  * @example
  * ```ts
- * const file: IFile = {
+ * const file: VexFile = {
  *     fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
  *     owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
  *     nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
  * };
  * ```
  */
-export interface IFile extends IFileSQL {}
+export interface VexFile extends FileSQL {}
 
 /**
  * Progress payload emitted by the `fileProgress` event.
  */
-export interface IFileProgress {
+export interface FileProgress {
     /** Whether this progress event is for upload or download. */
     direction: "download" | "upload";
     /** Bytes transferred so far. */
@@ -378,15 +403,15 @@ export interface IFileProgress {
 }
 
 /**
- * IFileRes is a server response to a file retrieval request.
+ * FileRes is a server response to a file retrieval request.
  *
  * Structure:
- * - `details`: metadata (`IFile`)
+ * - `details`: metadata (`VexFile`)
  * - `data`: decrypted binary bytes
  *
  * @example
  * ```ts
- * const response: IFileRes = {
+ * const response: FileRes = {
  *     details: {
  *         fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
  *         owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
@@ -396,35 +421,35 @@ export interface IFileProgress {
  * };
  * ```
  */
-export interface IFileRes extends IFileResponse {}
+export interface FileRes extends FileResponse {}
 
 /**
  * @ignore
  */
-export interface IFiles {
+export interface Files {
     /** Uploads and encrypts a file. */
-    create: (file: Uint8Array) => Promise<[IFileSQL, string]>;
+    create: (file: Uint8Array) => Promise<[FileSQL, string]>;
     /** Downloads and decrypts a file using a file ID and key. */
-    retrieve: (fileID: string, key: string) => Promise<IFileResponse | null>;
+    retrieve: (fileID: string, key: string) => Promise<FileResponse | null>;
 }
 
 /**
  * @ignore
  */
-export interface IInvites {
+export interface Invites {
     /** Creates an invite for a server and duration. */
-    create: (serverID: string, duration: string) => Promise<IInvite>;
+    create: (serverID: string, duration: string) => Promise<Invite>;
     /** Redeems an invite and returns the created permission grant. */
-    redeem: (inviteID: string) => Promise<IPermission>;
+    redeem: (inviteID: string) => Promise<Permission>;
     /** Lists active invites for a server. */
-    retrieve: (serverID: string) => Promise<IInvite[]>;
+    retrieve: (serverID: string) => Promise<Invite[]>;
 }
 
 /**
- * IKeys are a pair of ed25519 public and private keys,
+ * Keys are a pair of ed25519 public and private keys,
  * encoded as hex strings.
  */
-export interface IKeys {
+export interface Keys {
     /** Secret Ed25519 key as hex. Store securely. */
     private: string;
     /** Public Ed25519 key as hex. */
@@ -434,19 +459,19 @@ export interface IKeys {
 /**
  * @ignore
  */
-export interface IMe {
+export interface Me {
     /** Returns metadata for the currently authenticated device. */
-    device: () => IDevice;
+    device: () => Device;
     /** Uploads and sets a new avatar image for the current user. */
     setAvatar: (avatar: Uint8Array) => Promise<void>;
     /** Returns the currently authenticated user profile. */
-    user: () => IUser;
+    user: () => User;
 }
 
 /**
- * IMessage is a chat message.
+ * Message is a chat message.
  */
-export interface IMessage {
+export interface Message {
     /** User ID of the original author. */
     authorID: string;
     /** Whether payload decryption succeeded. */
@@ -470,13 +495,13 @@ export interface IMessage {
     /** Sender device ID. */
     sender: string;
     /** Time the message was created/received. */
-    timestamp: Date;
+    timestamp: string;
 }
 
 /**
  * @ignore
  */
-export interface IMessages {
+export interface Messages {
     /** Deletes local history for a user/channel, optionally older than a duration. */
     delete: (userOrChannelID: string, duration?: string) => Promise<void>;
     /** Sends an encrypted message to all members of a channel. */
@@ -484,9 +509,9 @@ export interface IMessages {
     /** Deletes all locally stored message history. */
     purge: () => Promise<void>;
     /** Returns local direct-message history with one user. */
-    retrieve: (userID: string) => Promise<IMessage[]>;
+    retrieve: (userID: string) => Promise<Message[]>;
     /** Returns local group-message history for one channel. */
-    retrieveGroup: (channelID: string) => Promise<IMessage[]>;
+    retrieveGroup: (channelID: string) => Promise<Message[]>;
     /** Sends an encrypted direct message to one user. */
     send: (userID: string, message: string) => Promise<void>;
 }
@@ -494,9 +519,9 @@ export interface IMessages {
 /**
  * @ignore
  */
-export interface IModeration {
+export interface Moderation {
     /** Returns all permission entries for a server. */
-    fetchPermissionList: (serverID: string) => Promise<IPermission[]>;
+    fetchPermissionList: (serverID: string) => Promise<Permission[]>;
     /** Removes a user from a server by revoking their server permission(s). */
     kick: (userID: string, serverID: string) => Promise<void>;
 }
@@ -504,31 +529,31 @@ export interface IModeration {
 /**
  * @ignore
  */
-export interface IPermissions {
+export interface Permissions {
     /** Deletes one permission grant. */
     delete: (permissionID: string) => Promise<void>;
     /** Lists permissions granted to the authenticated user. */
-    retrieve: () => Promise<IPermission[]>;
+    retrieve: () => Promise<Permission[]>;
 }
 
 /**
  * @ignore
  */
-export interface IServers {
+export interface Servers {
     /** Creates a server. */
-    create: (name: string) => Promise<IServer>;
+    create: (name: string) => Promise<Server>;
     /** Deletes a server. */
     delete: (serverID: string) => Promise<void>;
     /** Leaves a server by removing the user's permission entry. */
     leave: (serverID: string) => Promise<void>;
     /** Lists servers available to the authenticated user. */
-    retrieve: () => Promise<IServer[]>;
+    retrieve: () => Promise<Server[]>;
     /** Gets one server by ID. */
-    retrieveByID: (serverID: string) => Promise<IServer | null>;
+    retrieveByID: (serverID: string) => Promise<Server | null>;
 }
 
 /**
- * ISession is an end to end encryption session with another peer.
+ * Session is an end to end encryption session with another peer.
  *
  * Key fields include:
  * - `sessionID`
@@ -541,7 +566,7 @@ export interface IServers {
  *
  * @example
  * ```ts
- * const session: ISession = {
+ * const session: Session = {
  *     sessionID: "f6e4fbd0-7222-4ba8-b799-c227faf5c8de",
  *     userID: "f34f5e37-616f-4d3a-a437-e7c27c31cb73",
  *     deviceID: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
@@ -554,31 +579,31 @@ export interface IServers {
  * };
  * ```
  */
-export interface ISession extends ISessionSQL {}
+export interface Session extends SessionSQL {}
 
 /**
  * @ignore
  */
-export interface ISessions {
+export interface Sessions {
     /** Marks one session as verification-confirmed. */
     markVerified: (fingerprint: string) => Promise<void>;
     /** Returns all locally known sessions. */
-    retrieve: () => Promise<ISessionSQL[]>;
+    retrieve: () => Promise<SessionSQL[]>;
     /** Builds a human-readable verification phrase from a session fingerprint. */
-    verify: (session: ISessionSQL) => string;
+    verify: (session: SessionSQL) => string;
 }
 
 /**
- * IUser is a single user on the vex platform.
+ * User is a single user on the vex platform.
  *
  * This is intentionally a censored user shape for client use, containing:
  * - `userID`
  * - `username`
  * - `lastSeen`
  */
-export interface IUser {
-    /** Last-seen timestamp. */
-    lastSeen: Date;
+export interface User {
+    /** Last-seen timestamp (ISO 8601 string). */
+    lastSeen: string;
     /** User identifier. */
     userID: string;
     /** Public username. */
@@ -588,13 +613,13 @@ export interface IUser {
 /**
  * @ignore
  */
-export interface IUsers {
+export interface Users {
     /** Returns users with whom the current device has active sessions. */
-    familiars: () => Promise<IUser[]>;
+    familiars: () => Promise<User[]>;
     /**
      * Looks up a user by user ID, username, or signing key.
      */
-    retrieve: (userID: string) => Promise<[IUser | null, AxiosError | null]>;
+    retrieve: (userID: string) => Promise<[User | null, AxiosError | null]>;
 }
 
 /**
@@ -662,13 +687,13 @@ export class Client extends EventEmitter {
     /**
      * Channel operations.
      */
-    public channels: IChannels = {
+    public channels: Channels = {
         /**
          * Creates a new channel in a server.
          * @param name: The channel name.
          * @param serverID: The unique serverID to create the channel in.
          *
-         * @returns - The created IChannel object.
+         * @returns - The created Channel object.
          */
         create: this.createChannel.bind(this),
         /**
@@ -679,13 +704,13 @@ export class Client extends EventEmitter {
         /**
          * Retrieves all channels in a server.
          *
-         * @returns - The list of IChannel objects.
+         * @returns - The list of Channel objects.
          */
         retrieve: this.getChannelList.bind(this),
         /**
          * Retrieves channel details by its unique channelID.
          *
-         * @returns - The list of IChannel objects.
+         * @returns - The list of Channel objects.
          */
         retrieveByID: this.getChannelByID.bind(this),
         /**
@@ -698,7 +723,7 @@ export class Client extends EventEmitter {
     /**
      * Device management methods.
      */
-    public devices: IDevices = {
+    public devices: Devices = {
         delete: this.deleteDevice.bind(this),
         register: this.registerDevice.bind(this),
         retrieve: this.getDeviceByID.bind(this),
@@ -713,14 +738,14 @@ export class Client extends EventEmitter {
      * const list = await client.emoji.retrieveList(serverID);
      * ```
      */
-    public emoji: IEmojis = {
+    public emoji: Emojis = {
         create: this.uploadEmoji.bind(this),
         retrieve: this.retrieveEmojiByID.bind(this),
         retrieveList: this.retrieveEmojiList.bind(this),
     };
 
     /** File upload/download methods. */
-    public files: IFiles = {
+    public files: Files = {
         /**
          * Uploads an encrypted file and returns the details and the secret key.
          * @param file: The file as a Buffer.
@@ -744,7 +769,7 @@ export class Client extends EventEmitter {
     /**
      * Invite-management methods.
      */
-    public invites: IInvites = {
+    public invites: Invites = {
         create: this.createInvite.bind(this),
         redeem: this.redeemInvite.bind(this),
         retrieve: this.retrieveInvites.bind(this),
@@ -753,11 +778,11 @@ export class Client extends EventEmitter {
     /**
      * Helpers for information/actions related to the currently authenticated account.
      */
-    public me: IMe = {
+    public me: Me = {
         /**
          * Retrieves current device details
          *
-         * @returns - The logged in device's IDevice object.
+         * @returns - The logged in device's Device object.
          */
         device: this.getDevice.bind(this),
         /**
@@ -767,7 +792,7 @@ export class Client extends EventEmitter {
         /**
          * Retrieves your user information
          *
-         * @returns - The logged in user's IUser object.
+         * @returns - The logged in user's User object.
          */
         user: this.getUser.bind(this),
     };
@@ -782,7 +807,7 @@ export class Client extends EventEmitter {
      * const dmHistory = await client.messages.retrieve(userID);
      * ```
      */
-    public messages: IMessages = {
+    public messages: Messages = {
         delete: this.deleteHistory.bind(this),
         /**
          * Send a group message to a channel.
@@ -795,14 +820,14 @@ export class Client extends EventEmitter {
          * Gets the message history with a specific userID.
          * @param userID: The userID of the user to retrieve message history for.
          *
-         * @returns - The list of IMessage objects.
+         * @returns - The list of Message objects.
          */
         retrieve: this.getMessageHistory.bind(this),
         /**
          * Gets the group message history with a specific channelID.
          * @param chqnnelID: The channelID of the channel to retrieve message history for.
          *
-         * @returns - The list of IMessage objects.
+         * @returns - The list of Message objects.
          */
         retrieveGroup: this.getGroupHistory.bind(this),
         /**
@@ -816,7 +841,7 @@ export class Client extends EventEmitter {
     /**
      * Server moderation helper methods.
      */
-    public moderation: IModeration = {
+    public moderation: Moderation = {
         fetchPermissionList: this.fetchPermissionList.bind(this),
         kick: this.kickUser.bind(this),
     };
@@ -824,12 +849,12 @@ export class Client extends EventEmitter {
     /**
      * Permission-management methods for the current user.
      */
-    public permissions: IPermissions = {
+    public permissions: Permissions = {
         delete: this.deletePermission.bind(this),
         retrieve: this.getPermissions.bind(this),
     };
 
-    public sending: Record<string, IDevice> = {};
+    public sending: Record<string, Device> = {};
 
     /**
      * Server operations.
@@ -840,12 +865,12 @@ export class Client extends EventEmitter {
      * const created = await client.servers.create("Team Space");
      * ```
      */
-    public servers: IServers = {
+    public servers: Servers = {
         /**
          * Creates a new server.
          * @param name: The server name.
          *
-         * @returns - The created IServer object.
+         * @returns - The created Server object.
          */
         create: this.createServer.bind(this),
         /**
@@ -857,13 +882,13 @@ export class Client extends EventEmitter {
         /**
          * Retrieves all servers the logged in user has access to.
          *
-         * @returns - The list of IServer objects.
+         * @returns - The list of Server objects.
          */
         retrieve: this.getServerList.bind(this),
         /**
          * Retrieves server details by its unique serverID.
          *
-         * @returns - The requested IServer object, or null if the id does not exist.
+         * @returns - The requested Server object, or null if the id does not exist.
          */
         retrieveByID: this.getServerByID.bind(this),
     };
@@ -871,7 +896,7 @@ export class Client extends EventEmitter {
     /**
      * Encryption-session helpers.
      */
-    public sessions: ISessions = {
+    public sessions: Sessions = {
         /**
          * Marks a mnemonic verified, implying that the the user has confirmed
          * that the session mnemonic matches with the other user.
@@ -883,13 +908,13 @@ export class Client extends EventEmitter {
         /**
          * Gets all encryption sessions.
          *
-         * @returns - The list of ISession encryption sessions.
+         * @returns - The list of Session encryption sessions.
          */
         retrieve: this.getSessionList.bind(this),
 
         /**
          * Returns a mnemonic for the session, to verify with the other user.
-         * @param session the ISession object to get the mnemonic for.
+         * @param session the Session object to get the mnemonic for.
          *
          * @returns - The mnemonic representation of the session.
          */
@@ -905,33 +930,33 @@ export class Client extends EventEmitter {
      * const familiarUsers = await client.users.familiars();
      * ```
      */
-    public users: IUsers = {
+    public users: Users = {
         /**
          * Retrieves the list of users you can currently access, or are already familiar with.
          *
-         * @returns - The list of IUser objects.
+         * @returns - The list of User objects.
          */
         familiars: this.getFamiliars.bind(this),
         /**
          * Retrieves a user's information by a string identifier.
          * @param identifier: A userID, hex string public key, or a username.
          *
-         * @returns - The user's IUser object, or null if the user does not exist.
+         * @returns - The user's User object, or null if the user does not exist.
          */
         retrieve: this.retrieveUserDBEntry.bind(this),
     };
 
-    private readonly adapters: IClientAdapters;
+    private readonly adapters: ClientAdapters;
 
     private readonly ax: AxiosInstance;
 
-    private conn: IWebSocketLike;
-    private readonly database: IStorage;
+    private conn: WebSocketLike;
+    private readonly database: Storage;
 
     private readonly dbPath: string;
 
-    private device?: IDevice;
-    private deviceRecords: Record<string, IDevice> = {};
+    private device?: Device;
+    private deviceRecords: Record<string, Device> = {};
     private fetchingMail: boolean = false;
     private firstMailFetch = true;
     private readonly forwarded: string[] = [];
@@ -941,12 +966,12 @@ export class Client extends EventEmitter {
     private readonly idKeys: nacl.BoxKeyPair | null;
     private isAlive: boolean = true;
 
-    private readonly log: ILogger;
+    private readonly log: Logger;
 
     private readonly mailInterval?: NodeJS.Timeout;
     private manuallyClosing: boolean = false;
 
-    private readonly options?: IClientOptions;
+    private readonly options?: ClientOptions;
     private pingInterval: null | ReturnType<typeof setTimeout> = null;
     private readonly prefixes:
         | { HTTP: "http://"; WS: "ws://" }
@@ -959,15 +984,15 @@ export class Client extends EventEmitter {
 
     private token: null | string = null;
 
-    private user?: IUser;
+    private user?: User;
 
-    private userRecords: Record<string, IUser> = {};
+    private userRecords: Record<string, User> = {};
     private xKeyRing?: IXKeyRing;
 
     private constructor(
         privateKey?: string,
-        options?: IClientOptions,
-        storage?: IStorage,
+        options?: ClientOptions,
+        storage?: Storage,
     ) {
         super();
         this.options = options;
@@ -1007,7 +1032,7 @@ export class Client extends EventEmitter {
         }
         this.database = storage;
 
-        this.database.on("error", (error) => {
+        this.database.on("error", (error: Error) => {
             this.log.error(error.toString());
             this.close(true);
         });
@@ -1048,7 +1073,7 @@ export class Client extends EventEmitter {
      *
      * @param privateKey Optional hex secret key. When omitted, a fresh key is generated.
      * @param options Runtime options.
-     * @param storage Optional custom storage backend implementing `IStorage`.
+     * @param storage Optional custom storage backend implementing `Storage`.
      *
      * @example
      * ```ts
@@ -1057,8 +1082,8 @@ export class Client extends EventEmitter {
      */
     public static create = async (
         privateKey?: string,
-        options?: IClientOptions,
-        storage?: IStorage,
+        options?: ClientOptions,
+        storage?: Storage,
     ): Promise<Client> => {
         let opts = options;
         if (!opts?.adapters) {
@@ -1151,7 +1176,7 @@ export class Client extends EventEmitter {
         }
     }
 
-    private static getMnemonic(session: ISessionSQL): string {
+    private static getMnemonic(session: SessionSQL): string {
         return xMnemonic(xKDF(XUtils.decodeHex(session.fingerprint)));
     }
 
@@ -1210,7 +1235,7 @@ export class Client extends EventEmitter {
             msgpack.encode({ signed }),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        const { deviceToken } = msgpack.decode(new Uint8Array(res.data));
+        const { deviceToken } = decodeAxios(ConnectResponseCodec, res.data);
         this.ax.defaults.headers.common["X-Device-Token"] = deviceToken;
 
         this.log.info("Starting websocket.");
@@ -1236,7 +1261,7 @@ export class Client extends EventEmitter {
     /**
      * Gets the hex string representations of the public and private keys.
      */
-    public getKeys(): IKeys {
+    public getKeys(): Keys {
         return {
             private: XUtils.encodeHex(this.signKeys.secretKey),
             public: XUtils.encodeHex(this.signKeys.publicKey),
@@ -1271,8 +1296,8 @@ export class Client extends EventEmitter {
                     headers: { "Content-Type": "application/msgpack" },
                 },
             );
-            const { token, user }: { token: string; user: IUser; } =
-                msgpack.decode(new Uint8Array(res.data));
+            const { token, user } =
+                decodeAxios(AuthResponseCodec, res.data);
 
             this.setUser(user);
             this.token = token;
@@ -1308,8 +1333,8 @@ export class Client extends EventEmitter {
                 }),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const { challenge, challengeID } = msgpack.decode(
-                new Uint8Array(challengeRes.data),
+            const { challenge, challengeID } = decodeAxios(
+                DeviceChallengeCodec, challengeRes.data,
             );
 
             const signed = XUtils.encodeHex(
@@ -1321,8 +1346,8 @@ export class Client extends EventEmitter {
                 msgpack.encode({ challengeID, signed }),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const { token, user }: { token: string; user: IUser; } =
-                msgpack.decode(new Uint8Array(verifyRes.data));
+            const { token, user } =
+                decodeAxios(AuthResponseCodec, verifyRes.data);
 
             this.setUser(user);
             this.token = token;
@@ -1352,7 +1377,7 @@ export class Client extends EventEmitter {
     public async register(
         username: string,
         password: string,
-    ): Promise<[IUser | null, Error | null]> {
+    ): Promise<[User | null, Error | null]> {
         while (!this.xKeyRing) {
             await sleep(100);
         }
@@ -1365,7 +1390,7 @@ export class Client extends EventEmitter {
                     this.signKeys.secretKey,
                 ),
             );
-            const regMsg: IRegistrationPayload = {
+            const regMsg: RegistrationPayload = {
                 deviceName: this.options?.deviceName ?? "unknown",
                 password,
                 preKey: XUtils.encodeHex(
@@ -1385,7 +1410,7 @@ export class Client extends EventEmitter {
                     msgpack.encode(regMsg),
                     { headers: { "Content-Type": "application/msgpack" } },
                 );
-                this.setUser(msgpack.decode(new Uint8Array(res.data)));
+                this.setUser(decodeAxios(UserCodec, res.data));
                 return [this.getUser(), null];
             } catch (err) {
                 if (err.response) {
@@ -1420,19 +1445,15 @@ export class Client extends EventEmitter {
     public async whoami(): Promise<{
         exp: number;
         token: string;
-        user: IUser;
+        user: User;
     }> {
         const res = await this.ax.post(this.getHost() + "/whoami");
 
-        const whoami: {
-            exp: number;
-            token: string;
-            user: IUser;
-        } = msgpack.decode(new Uint8Array(res.data));
+        const whoami = decodeAxios(WhoamiCodec, res.data);
         return whoami;
     }
 
-    private censorPreKey(preKey: IPreKeysSQL): IPreKeysWS {
+    private censorPreKey(preKey: PreKeysSQL): PreKeysWS {
         if (!preKey.index) {
             throw new Error("Key index is required.");
         }
@@ -1447,18 +1468,18 @@ export class Client extends EventEmitter {
     private async createChannel(
         name: string,
         serverID: string,
-    ): Promise<IChannel> {
+    ): Promise<Channel> {
         const body = { name };
         const res = await this.ax.post(
             this.getHost() + "/server/" + serverID + "/channels",
             msgpack.encode(body),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(ChannelCodec, res.data);
     }
 
     // returns the file details and the encryption key
-    private async createFile(file: Uint8Array): Promise<[IFileSQL, string]> {
+    private async createFile(file: Uint8Array): Promise<[FileSQL, string]> {
         this.log.info("Creating file, size: " + formatBytes(file.byteLength));
 
         const nonce = xMakeNonce();
@@ -1484,7 +1505,7 @@ export class Client extends EventEmitter {
                                 (progressEvent.total ?? 1),
                         );
                         const { loaded, total = 0 } = progressEvent;
-                        const progress: IFileProgress = {
+                        const progress: FileProgress = {
                             direction: "upload",
                             loaded,
                             progress: percentCompleted,
@@ -1495,9 +1516,7 @@ export class Client extends EventEmitter {
                     },
                 },
             );
-            const fcreatedFile: IFileSQL = msgpack.decode(
-                new Uint8Array(fres.data),
-            );
+            const fcreatedFile = decodeAxios(FileSQLCodec, fres.data);
 
             return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
         }
@@ -1516,7 +1535,7 @@ export class Client extends EventEmitter {
             msgpack.encode(payload),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        const createdFile: IFileSQL = msgpack.decode(new Uint8Array(res.data));
+        const createdFile = decodeAxios(FileSQLCodec, res.data);
 
         return [createdFile, XUtils.encodeHex(key.secretKey)];
     }
@@ -1532,7 +1551,7 @@ export class Client extends EventEmitter {
             payload,
         );
 
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(InviteCodec, res.data);
     }
 
     private createPreKey() {
@@ -1547,16 +1566,16 @@ export class Client extends EventEmitter {
         return preKeys;
     }
 
-    private async createServer(name: string): Promise<IServer> {
+    private async createServer(name: string): Promise<Server> {
         const res = await this.ax.post(
             this.getHost() + "/server/" + globalThis.btoa(name),
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(ServerCodec, res.data);
     }
 
     private async createSession(
-        device: IDevice,
-        user: IUser,
+        device: Device,
+        user: User,
         message: Uint8Array,
         group: null | Uint8Array,
         /* this is passed through if the first message is 
@@ -1564,7 +1583,7 @@ export class Client extends EventEmitter {
         mailID: null | string,
         forward: boolean,
     ): Promise<void> {
-        let keyBundle: IKeyBundle;
+        let keyBundle: KeyBundle;
 
         this.log.info(
             "Requesting key bundle for device: " +
@@ -1642,7 +1661,7 @@ export class Client extends EventEmitter {
             IDX,
         );
 
-        const mail: IMailWS = {
+        const mail: MailWS = {
             authorID: this.getUser().userID,
             cipher,
             extra,
@@ -1660,7 +1679,7 @@ export class Client extends EventEmitter {
         this.log.info("Mail hash: " + objectHash(mail));
         this.log.info("Generated hmac: " + XUtils.encodeHex(hmac));
 
-        const msg: IResourceMsg = {
+        const msg: ResourceMsg = {
             action: "CREATE",
             data: mail,
             resourceType: "mail",
@@ -1673,10 +1692,10 @@ export class Client extends EventEmitter {
 
         // save the encryption session
         this.log.info("Saving new session.");
-        const sessionEntry: ISessionSQL = {
+        const sessionEntry: SessionSQL = {
             deviceID: device.deviceID,
             fingerprint: XUtils.encodeHex(AD),
-            lastUsed: new Date(Date.now()),
+            lastUsed: new Date().toISOString(),
             mode: "initiator",
             publicKey: XUtils.encodeHex(PK),
             sessionID: uuid.v4(),
@@ -1690,7 +1709,7 @@ export class Client extends EventEmitter {
         this.emit("session", sessionEntry, user);
 
         // emit the message
-        const emitMsg: IMessage = forward
+        const emitMsg: Message = forward
             ? { ...msgpack.decode(message), forward: true }
             : {
                   authorID: mail.authorID,
@@ -1704,7 +1723,7 @@ export class Client extends EventEmitter {
                   readerID: mail.readerID,
                   recipient: mail.recipient,
                   sender: mail.sender,
-                  timestamp: new Date(Date.now()),
+                  timestamp: new Date().toISOString(),
               };
         this.emit("message", emitMsg);
 
@@ -1715,7 +1734,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msg.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISuccessMsg).data);
+                        res((receivedMsg as SuccessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
@@ -1767,11 +1786,11 @@ export class Client extends EventEmitter {
     /**
      * Gets a list of permissions for a server.
      *
-     * @returns - The list of IPermissions objects.
+     * @returns - The list of Permissions objects.
      */
     private async fetchPermissionList(
         serverID: string,
-    ): Promise<IPermission[]> {
+    ): Promise<Permission[]> {
         const res = await this.ax.get(
             this.prefixes.HTTP +
                 this.host +
@@ -1779,10 +1798,10 @@ export class Client extends EventEmitter {
                 serverID +
                 "/permissions",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(PermissionArrayCodec, res.data);
     }
 
-    private async forward(message: IMessage) {
+    private async forward(message: Message) {
         const copy = { ...message };
 
         if (this.forwarded.includes(copy.mailID)) {
@@ -1830,25 +1849,25 @@ export class Client extends EventEmitter {
         });
     }
 
-    private async getChannelByID(channelID: string): Promise<IChannel | null> {
+    private async getChannelByID(channelID: string): Promise<Channel | null> {
         try {
             const res = await this.ax.get(
                 this.getHost() + "/channel/" + channelID,
             );
-            return msgpack.decode(new Uint8Array(res.data));
+            return decodeAxios(ChannelCodec, res.data);
         } catch (err) {
             return null;
         }
     }
 
-    private async getChannelList(serverID: string): Promise<IChannel[]> {
+    private async getChannelList(serverID: string): Promise<Channel[]> {
         const res = await this.ax.get(
             this.getHost() + "/server/" + serverID + "/channels",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(ChannelArrayCodec, res.data);
     }
 
-    private getDevice(): IDevice {
+    private getDevice(): Device {
         if (!this.device) {
             throw new Error(
                 "You must wait until the auth event is emitted before fetching device details.",
@@ -1857,7 +1876,7 @@ export class Client extends EventEmitter {
         return this.device;
     }
 
-    private async getDeviceByID(deviceID: string): Promise<IDevice | null> {
+    private async getDeviceByID(deviceID: string): Promise<Device | null> {
         if (this.deviceRecords[deviceID]) {
             this.log.info("Found device in local cache.");
             return this.deviceRecords[deviceID];
@@ -1874,7 +1893,7 @@ export class Client extends EventEmitter {
                 this.getHost() + "/device/" + deviceID,
             );
             this.log.info("Retrieved device from server.");
-            const fetchedDevice = msgpack.decode(new Uint8Array(res.data));
+            const fetchedDevice = decodeAxios(DeviceCodec, res.data);
             this.deviceRecords[deviceID] = fetchedDevice;
             await this.database.saveDevice(fetchedDevice);
             return fetchedDevice;
@@ -1884,9 +1903,9 @@ export class Client extends EventEmitter {
     }
 
     /* Retrieves the current list of users you have sessions with. */
-    private async getFamiliars(): Promise<IUser[]> {
+    private async getFamiliars(): Promise<User[]> {
         const sessions = await this.database.getAllSessions();
-        const familiars: IUser[] = [];
+        const familiars: User[] = [];
 
         for (const session of sessions) {
             const [user, err] = await this.retrieveUserDBEntry(session.userID);
@@ -1898,8 +1917,8 @@ export class Client extends EventEmitter {
         return familiars;
     }
 
-    private async getGroupHistory(channelID: string): Promise<IMessage[]> {
-        const messages: IMessage[] =
+    private async getGroupHistory(channelID: string): Promise<Message[]> {
+        const messages: Message[] =
             await this.database.getGroupHistory(channelID);
 
         return messages;
@@ -1928,12 +1947,12 @@ export class Client extends EventEmitter {
                     this.getDevice().deviceID +
                     "/mail",
             );
-            const inbox: Array<[Uint8Array, IMailWS, Date]> = msgpack
+            const inbox: Array<[Uint8Array, MailWS, Date]> = msgpack
                 .decode(new Uint8Array(res.data))
                 .sort(
                     (
-                        a: [Uint8Array, IMailWS, Date],
-                        b: [Uint8Array, IMailWS, Date],
+                        a: [Uint8Array, MailWS, Date],
+                        b: [Uint8Array, MailWS, Date],
                     ) => b[2].getTime() - a[2].getTime(),
                 );
 
@@ -1955,8 +1974,8 @@ export class Client extends EventEmitter {
         this.fetchingMail = false;
     }
 
-    private async getMessageHistory(userID: string): Promise<IMessage[]> {
-        const messages: IMessage[] =
+    private async getMessageHistory(userID: string): Promise<Message[]> {
+        const messages: Message[] =
             await this.database.getMessageHistory(userID);
 
         return messages;
@@ -1964,14 +1983,14 @@ export class Client extends EventEmitter {
 
     private async getMultiUserDeviceList(
         userIDs: string[],
-    ): Promise<IDevice[]> {
+    ): Promise<Device[]> {
         try {
             const res = await this.ax.post(
                 this.getHost() + "/deviceList",
                 msgpack.encode(userIDs),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
+            const devices = decodeAxios(DeviceArrayCodec, res.data);
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -1989,37 +2008,37 @@ export class Client extends EventEmitter {
                 this.getDevice().deviceID +
                 "/otk/count",
         );
-        return msgpack.decode(new Uint8Array(res.data)).count;
+        return decodeAxios(OtkCountCodec, res.data).count;
     }
 
     /**
      * Gets all permissions for the logged in user.
      *
-     * @returns - The list of IPermissions objects.
+     * @returns - The list of Permissions objects.
      */
-    private async getPermissions(): Promise<IPermission[]> {
+    private async getPermissions(): Promise<Permission[]> {
         const res = await this.ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/permissions",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(PermissionArrayCodec, res.data);
     }
 
-    private async getServerByID(serverID: string): Promise<IServer | null> {
+    private async getServerByID(serverID: string): Promise<Server | null> {
         try {
             const res = await this.ax.get(
                 this.getHost() + "/server/" + serverID,
             );
-            return msgpack.decode(new Uint8Array(res.data));
+            return decodeAxios(ServerCodec, res.data);
         } catch (err) {
             return null;
         }
     }
 
-    private async getServerList(): Promise<IServer[]> {
+    private async getServerList(): Promise<Server[]> {
         const res = await this.ax.get(
             this.getHost() + "/user/" + this.getUser().userID + "/servers",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(ServerArrayCodec, res.data);
     }
 
     private async getSessionByPubkey(publicKey: Uint8Array) {
@@ -2047,21 +2066,21 @@ export class Client extends EventEmitter {
             | "file"
             | "invite"
             | "register",
-    ): Promise<IActionToken | null> {
+    ): Promise<ActionToken | null> {
         try {
             const res = await this.ax.get(this.getHost() + "/token/" + type, {
                 responseType: "arraybuffer",
             });
-            return msgpack.decode(new Uint8Array(res.data));
+            return decodeAxios(ActionTokenCodec, res.data);
         } catch (err) {
             this.log.warn(err.toString());
             return null;
         }
     }
 
-    /* Get the currently logged in user. You cannot call this until 
+    /* Get the currently logged in user. You cannot call this until
     after the auth event is emitted. */
-    private getUser(): IUser {
+    private getUser(): User {
         if (!this.user) {
             throw new Error(
                 "You must wait until the auth event is emitted before fetching user details.",
@@ -2070,12 +2089,12 @@ export class Client extends EventEmitter {
         return this.user;
     }
 
-    private async getUserDeviceList(userID: string): Promise<IDevice[] | null> {
+    private async getUserDeviceList(userID: string): Promise<Device[] | null> {
         try {
             const res = await this.ax.get(
                 this.getHost() + "/user/" + userID + "/devices",
             );
-            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
+            const devices = decodeAxios(DeviceArrayCodec, res.data);
             for (const device of devices) {
                 this.deviceRecords[device.deviceID] = device;
             }
@@ -2086,14 +2105,14 @@ export class Client extends EventEmitter {
         }
     }
 
-    private async getUserList(channelID: string): Promise<IUser[]> {
+    private async getUserList(channelID: string): Promise<User[]> {
         const res = await this.ax.post(
             this.getHost() + "/userList/" + channelID,
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(UserArrayCodec, res.data);
     }
 
-    private async handleNotify(msg: INotifyMsg) {
+    private async handleNotify(msg: NotifyMsg) {
         switch (msg.event) {
             case "mail":
                 this.log.info("Server has informed us of new mail.");
@@ -2101,7 +2120,7 @@ export class Client extends EventEmitter {
                 this.fetchingMail = false;
                 break;
             case "permission":
-                this.emit("permission", msg.data as IPermission);
+                this.emit("permission", msg.data as Permission);
                 break;
             case "retryRequest":
                 const messageID = msg.data;
@@ -2168,7 +2187,7 @@ export class Client extends EventEmitter {
                 }
             });
 
-            this.conn.on("error", (error) => {
+            this.conn.on("error", (error: Error) => {
                 throw error;
             });
 
@@ -2185,13 +2204,13 @@ export class Client extends EventEmitter {
                 switch (msg.type) {
                     case "challenge":
                         this.log.info("Received challenge from server.");
-                        this.respond(msg as IChallMsg);
+                        this.respond(msg as ChallMsg);
                         break;
                     case "error":
                         this.log.warn(JSON.stringify(msg));
                         break;
                     case "notify":
-                        this.handleNotify(msg as INotifyMsg);
+                        this.handleNotify(msg as NotifyMsg);
                         break;
                     case "ping":
                         this.pong(msg.transmissionID);
@@ -2340,7 +2359,7 @@ export class Client extends EventEmitter {
 
     private async readMail(
         header: Uint8Array,
-        mail: IMailWS,
+        mail: MailWS,
         timestamp: string,
     ) {
         this.sendReceipt(mail.nonce);
@@ -2487,7 +2506,7 @@ export class Client extends EventEmitter {
                         }
 
                         // emit the message
-                        const message: IMessage = mail.forward
+                        const message: Message = mail.forward
                             ? { ...msgpack.decode(unsealed), forward: true }
                             : {
                                   authorID: mail.authorID,
@@ -2503,7 +2522,7 @@ export class Client extends EventEmitter {
                                   readerID: mail.readerID,
                                   recipient: mail.recipient,
                                   sender: mail.sender,
-                                  timestamp: new Date(timestamp),
+                                  timestamp: timestamp,
                               };
 
                         this.emit("message", message);
@@ -2527,10 +2546,10 @@ export class Client extends EventEmitter {
                         this.deviceRecords[deviceEntry.deviceID] = deviceEntry;
 
                         // save session
-                        const newSession: ISessionSQL = {
+                        const newSession: SessionSQL = {
                             deviceID: mail.sender,
                             fingerprint: XUtils.encodeHex(AD),
-                            lastUsed: new Date(Date.now()),
+                            lastUsed: new Date().toISOString(),
                             mode: "receiver",
                             publicKey: XUtils.encodeHex(PK),
                             sessionID: uuid.v4(),
@@ -2619,7 +2638,7 @@ export class Client extends EventEmitter {
                             plaintext = XUtils.encodeUTF8(decrypted);
                         }
                         // emit the message
-                        const message: IMessage = mail.forward
+                        const message: Message = mail.forward
                             ? {
                                   ...msgpack.decode(decrypted),
                                   forward: true,
@@ -2638,7 +2657,7 @@ export class Client extends EventEmitter {
                                   readerID: mail.readerID,
                                   recipient: mail.recipient,
                                   sender: mail.sender,
-                                  timestamp: new Date(timestamp),
+                                  timestamp: timestamp,
                               };
                         this.emit("message", message);
 
@@ -2648,7 +2667,7 @@ export class Client extends EventEmitter {
                         healSession();
 
                         // emit the message
-                        const message: IMessage = {
+                        const message: Message = {
                             authorID: mail.authorID,
                             decrypted: false,
                             direction: "incoming",
@@ -2662,7 +2681,7 @@ export class Client extends EventEmitter {
                             readerID: mail.readerID,
                             recipient: mail.recipient,
                             sender: mail.sender,
-                            timestamp: new Date(timestamp),
+                            timestamp: timestamp,
                         };
                         this.emit("message", message);
                     }
@@ -2676,12 +2695,12 @@ export class Client extends EventEmitter {
         }
     }
 
-    private async redeemInvite(inviteID: string): Promise<IPermission> {
+    private async redeemInvite(inviteID: string): Promise<Permission> {
         const res = await this.ax.patch(this.getHost() + "/invite/" + inviteID);
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(PermissionCodec, res.data);
     }
 
-    private async registerDevice(): Promise<IDevice | null> {
+    private async registerDevice(): Promise<Device | null> {
         while (!this.xKeyRing) {
             await sleep(100);
         }
@@ -2709,7 +2728,7 @@ export class Client extends EventEmitter {
             ),
         );
 
-        const devMsg: IDevicePayload = {
+        const devMsg: DevicePayload = {
             deviceName: this.options?.deviceName ?? "unknown",
             preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
             preKeyIndex: this.xKeyRing.preKeys.index!,
@@ -2729,14 +2748,14 @@ export class Client extends EventEmitter {
                 msgpack.encode(devMsg),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(new Uint8Array(res.data));
+            return decodeAxios(DeviceCodec, res.data);
         } catch (err) {
             throw err;
         }
     }
 
-    private respond(msg: IChallMsg) {
-        const response: IRespMsg = {
+    private respond(msg: ChallMsg) {
+        const response: RespMsg = {
             signed: nacl.sign(msg.challenge, this.signKeys.secretKey),
             transmissionID: msg.transmissionID,
             type: "response",
@@ -2744,32 +2763,32 @@ export class Client extends EventEmitter {
         this.send(response);
     }
 
-    private async retrieveEmojiByID(emojiID: string): Promise<IEmoji | null> {
+    private async retrieveEmojiByID(emojiID: string): Promise<Emoji | null> {
         const res = await this.ax.get(
             this.getHost() + "/emoji/" + emojiID + "/details",
         );
         if (!res.data) {
             return null;
         }
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(EmojiCodec, res.data);
     }
 
-    private async retrieveEmojiList(serverID: string): Promise<IEmoji[]> {
+    private async retrieveEmojiList(serverID: string): Promise<Emoji[]> {
         const res = await this.ax.get(
             this.getHost() + "/server/" + serverID + "/emoji",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(EmojiArrayCodec, res.data);
     }
 
     private async retrieveFile(
         fileID: string,
         key: string,
-    ): Promise<IFileResponse | null> {
+    ): Promise<FileResponse | null> {
         try {
             const detailsRes = await this.ax.get(
                 this.getHost() + "/file/" + fileID + "/details",
             );
-            const details = msgpack.decode(new Uint8Array(detailsRes.data));
+            const details = decodeAxios(FileSQLCodec, detailsRes.data);
 
             const res = await this.ax.get(this.getHost() + "/file/" + fileID, {
                 onDownloadProgress: (progressEvent) => {
@@ -2778,7 +2797,7 @@ export class Client extends EventEmitter {
                             (progressEvent.total ?? 1),
                     );
                     const { loaded, total = 0 } = progressEvent;
-                    const progress: IFileProgress = {
+                    const progress: FileProgress = {
                         direction: "download",
                         loaded,
                         progress: percentCompleted,
@@ -2797,7 +2816,7 @@ export class Client extends EventEmitter {
             );
 
             if (decrypted) {
-                const resp: IFileResponse = {
+                const resp: FileResponse = {
                     data: new Uint8Array(decrypted),
                     details,
                 };
@@ -2809,22 +2828,22 @@ export class Client extends EventEmitter {
         }
     }
 
-    private async retrieveInvites(serverID: string): Promise<IInvite[]> {
+    private async retrieveInvites(serverID: string): Promise<Invite[]> {
         const res = await this.ax.get(
             this.getHost() + "/server/" + serverID + "/invites",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(InviteArrayCodec, res.data);
     }
 
-    private async retrieveKeyBundle(deviceID: string): Promise<IKeyBundle> {
+    private async retrieveKeyBundle(deviceID: string): Promise<KeyBundle> {
         const res = await this.ax.post(
             this.getHost() + "/device/" + deviceID + "/keyBundle",
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(KeyBundleCodec, res.data);
     }
 
-    private async retrieveOrCreateDevice(): Promise<IDevice> {
-        let device: IDevice;
+    private async retrieveOrCreateDevice(): Promise<Device> {
+        let device: Device;
         try {
             const res = await this.ax.get(
                 this.prefixes.HTTP +
@@ -2832,7 +2851,7 @@ export class Client extends EventEmitter {
                     "/device/" +
                     XUtils.encodeHex(this.signKeys.publicKey),
             );
-            device = msgpack.decode(new Uint8Array(res.data));
+            device = decodeAxios(DeviceCodec, res.data);
         } catch (err) {
             this.log.error(err.toString());
             if (err.response?.status === 404) {
@@ -2861,7 +2880,7 @@ export class Client extends EventEmitter {
     and finally falls back to username. */
     private async retrieveUserDBEntry(
         userIdentifier: string,
-    ): Promise<[IUser | null, AxiosError | null]> {
+    ): Promise<[User | null, AxiosError | null]> {
         if (this.userRecords[userIdentifier]) {
             return [this.userRecords[userIdentifier], null];
         }
@@ -2870,7 +2889,7 @@ export class Client extends EventEmitter {
             const res = await this.ax.get(
                 this.getHost() + "/user/" + userIdentifier,
             );
-            const userRecord = msgpack.decode(new Uint8Array(res.data));
+            const userRecord = decodeAxios(UserCodec, res.data);
             this.userRecords[userIdentifier] = userRecord;
             return [userRecord, null];
         } catch (err) {
@@ -2947,8 +2966,8 @@ export class Client extends EventEmitter {
 
     /* Sends encrypted mail to a user. */
     private async sendMail(
-        device: IDevice,
-        user: IUser,
+        device: Device,
+        user: User,
         msg: Uint8Array,
         group: null | Uint8Array,
         mailID: null | string,
@@ -2988,7 +3007,7 @@ export class Client extends EventEmitter {
         const cipher = nacl.secretbox(msg, nonce, session.SK);
         const extra = session.publicKey;
 
-        const mail: IMailWS = {
+        const mail: MailWS = {
             authorID: this.getUser().userID,
             cipher,
             extra,
@@ -3002,7 +3021,7 @@ export class Client extends EventEmitter {
             sender: this.getDevice().deviceID,
         };
 
-        const msgb: IResourceMsg = {
+        const msgb: ResourceMsg = {
             action: "CREATE",
             data: mail,
             resourceType: "mail",
@@ -3014,7 +3033,7 @@ export class Client extends EventEmitter {
         this.log.info("Mail hash: " + objectHash(mail));
         this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
 
-        const outMsg: IMessage = forward
+        const outMsg: Message = forward
             ? { ...msgpack.decode(msg), forward: true }
             : {
                   authorID: mail.authorID,
@@ -3028,7 +3047,7 @@ export class Client extends EventEmitter {
                   readerID: mail.readerID,
                   recipient: mail.recipient,
                   sender: mail.sender,
-                  timestamp: new Date(Date.now()),
+                  timestamp: new Date().toISOString(),
               };
         this.emit("message", outMsg);
 
@@ -3038,7 +3057,7 @@ export class Client extends EventEmitter {
                 if (receivedMsg.transmissionID === msgb.transmissionID) {
                     this.conn.off("message", callback);
                     if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISuccessMsg).data);
+                        res((receivedMsg as SuccessMsg).data);
                     } else {
                         rej({
                             error: receivedMsg,
@@ -3110,7 +3129,7 @@ export class Client extends EventEmitter {
     }
 
     private sendReceipt(nonce: Uint8Array) {
-        const receipt: IReceiptMsg = {
+        const receipt: ReceiptMsg = {
             nonce,
             transmissionID: uuid.v4(),
             type: "receipt",
@@ -3122,7 +3141,7 @@ export class Client extends EventEmitter {
         this.isAlive = status;
     }
 
-    private setUser(user: IUser): void {
+    private setUser(user: User): void {
         this.user = user;
     }
 
@@ -3143,7 +3162,7 @@ export class Client extends EventEmitter {
 
         await this.ax.post(
             this.getHost() + "/device/" + this.getDevice().deviceID + "/otk",
-            msgpack.encode(savedKeys.map((key) => this.censorPreKey(key))),
+            msgpack.encode(savedKeys.map((key: any) => this.censorPreKey(key))),
             {
                 headers: { "Content-Type": "application/msgpack" },
             },
@@ -3169,7 +3188,7 @@ export class Client extends EventEmitter {
                                 (progressEvent.total ?? 1),
                         );
                         const { loaded, total = 0 } = progressEvent;
-                        const progress: IFileProgress = {
+                        const progress: FileProgress = {
                             direction: "upload",
                             loaded,
                             progress: percentCompleted,
@@ -3201,7 +3220,7 @@ export class Client extends EventEmitter {
         emoji: Uint8Array,
         name: string,
         serverID: string,
-    ): Promise<IEmoji | null> {
+    ): Promise<Emoji | null> {
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
             fpayload.set("emoji", new Blob([new Uint8Array(emoji)]));
@@ -3219,7 +3238,7 @@ export class Client extends EventEmitter {
                                     (progressEvent.total ?? 1),
                             );
                             const { loaded, total = 0 } = progressEvent;
-                            const progress: IFileProgress = {
+                            const progress: FileProgress = {
                                 direction: "upload",
                                 loaded,
                                 progress: percentCompleted,
@@ -3230,7 +3249,7 @@ export class Client extends EventEmitter {
                         },
                     },
                 );
-                return msgpack.decode(new Uint8Array(res.data));
+                return decodeAxios(EmojiCodec, res.data);
             } catch (err) {
                 return null;
             }
@@ -3246,7 +3265,7 @@ export class Client extends EventEmitter {
                 msgpack.encode(payload),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            return msgpack.decode(new Uint8Array(res.data));
+            return decodeAxios(EmojiCodec, res.data);
         } catch (err) {
             return null;
         }

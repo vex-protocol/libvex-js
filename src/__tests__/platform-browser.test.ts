@@ -1,4 +1,4 @@
-import type { IClientOptions } from "../index.js";
+import type { ClientOptions } from "../index.js";
 
 import { MemoryStorage } from "./harness/memory-storage.js";
 import { browserTestAdapters } from "./harness/platform-transports.js";
@@ -11,7 +11,7 @@ import { platformSuite } from "./harness/shared-suite.js";
 platformSuite(
     "browser",
     browserTestAdapters,
-    async (SK: string, _opts: IClientOptions) => {
+    async (SK: string, _opts: ClientOptions) => {
         const storage = new MemoryStorage(SK);
         await storage.init();
         return storage;

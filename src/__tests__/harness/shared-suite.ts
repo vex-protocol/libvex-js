@@ -5,9 +5,9 @@
  * Runs register → login → connect → send/receive DM against a real spire.
  */
 
-import type { IClientOptions, IMessage } from "../../index.js";
-import type { IStorage } from "../../IStorage.js";
-import type { IClientAdapters } from "../../transport/types.js";
+import type { ClientOptions, Message } from "../../index.js";
+import type { Storage } from "../../Storage.js";
+import type { ClientAdapters } from "../../transport/types.js";
 
 import { Client } from "../../index.js";
 
@@ -15,11 +15,11 @@ import { testFile, testImage } from "./fixtures.js";
 
 export function platformSuite(
     platformName: string,
-    makeAdapters: () => IClientAdapters,
+    makeAdapters: () => ClientAdapters,
     makeStorage: (
         SK: string,
-        opts: IClientOptions,
-    ) => IStorage | Promise<IStorage>,
+        opts: ClientOptions,
+    ) => Storage | Promise<Storage>,
 ) {
     describe.sequential(`platform: ${platformName}`, () => {
         let client: Client;
@@ -28,7 +28,7 @@ export function platformSuite(
 
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
-            const opts: IClientOptions = {
+            const opts: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -74,7 +74,7 @@ export function platformSuite(
 
         test("two-user DM", async () => {
             const SK2 = Client.generateSecretKey();
-            const opts2: IClientOptions = {
+            const opts2: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -114,7 +114,7 @@ export function platformSuite(
 
         test("group messaging in channel", async () => {
             const SK2 = Client.generateSecretKey();
-            const opts2: IClientOptions = {
+            const opts2: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -174,7 +174,7 @@ export function platformSuite(
             // device key, authenticate without password.
             const deviceKey = client.getKeys().private;
             const deviceID = client.me.device().deviceID;
-            const opts2: IClientOptions = {
+            const opts2: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -274,7 +274,7 @@ export function platformSuite(
         // the message only reaches device1.
         test.skip("multi-device message sync", async () => {
             const SK2 = Client.generateSecretKey();
-            const opts2: IClientOptions = {
+            const opts2: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -286,7 +286,7 @@ export function platformSuite(
 
             // Sender: separate user
             const SK3 = Client.generateSecretKey();
-            const opts3: IClientOptions = {
+            const opts3: ClientOptions = {
                 adapters: makeAdapters(),
                 dbLogLevel: "error",
                 inMemoryDb: true,
@@ -329,7 +329,7 @@ export function platformSuite(
                         }
                     };
 
-                    client.on("message", (msg: IMessage) => {
+                    client.on("message", (msg: Message) => {
                         if (
                             msg.direction === "incoming" &&
                             msg.decrypted &&
@@ -339,7 +339,7 @@ export function platformSuite(
                             check();
                         }
                     });
-                    device2.on("message", (msg: IMessage) => {
+                    device2.on("message", (msg: Message) => {
                         if (
                             msg.direction === "incoming" &&
                             msg.decrypted &&
@@ -393,7 +393,7 @@ export function platformSuite(
 }
 
 function apiUrlOverrideFromEnv():
-    | Pick<IClientOptions, "host" | "unsafeHttp">
+    | Pick<ClientOptions, "host" | "unsafeHttp">
     | undefined {
     const raw = process.env.API_URL?.trim();
     if (!raw) return undefined;
@@ -429,16 +429,16 @@ async function connectAndWait(
 
 async function waitForMessage(
     c: Client,
-    predicate: (m: IMessage) => boolean,
+    predicate: (m: Message) => boolean,
     label: string,
     timeout = 10_000,
-): Promise<IMessage> {
+): Promise<Message> {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(
             () => { reject(new Error(`${label} message timed out`)); },
             timeout,
         );
-        const onMsg = (msg: IMessage) => {
+        const onMsg = (msg: Message) => {
             if (predicate(msg)) {
                 clearTimeout(timer);
                 c.off("message", onMsg);

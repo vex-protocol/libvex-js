@@ -1,12 +1,12 @@
-import type { IMessage } from "../../index.js";
-import type { IStorage } from "../../IStorage.js";
+import type { Message } from "../../index.js";
+import type { Storage } from "../../Storage.js";
 import type { IPreKeysCrypto, ISessionCrypto } from "../../types/index.js";
-import type { IDevice, IPreKeysSQL, ISessionSQL } from "@vex-chat/types";
+import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 
 import { XKeyConvert, XUtils } from "@vex-chat/crypto";
 
 /**
- * Minimal in-memory IStorage for browser/RN platform tests.
+ * Minimal in-memory Storage for browser/RN platform tests.
  *
  * Uses eventemitter3 (browser-safe) instead of Node's events module.
  * No persistence — just enough for the register/login/connect/DM test flow.
@@ -14,16 +14,16 @@ import { XKeyConvert, XUtils } from "@vex-chat/crypto";
 import { EventEmitter } from "eventemitter3";
 import nacl from "tweetnacl";
 
-export class MemoryStorage extends EventEmitter implements IStorage {
+export class MemoryStorage extends EventEmitter implements Storage {
     public ready = false;
-    private readonly devices: IDevice[] = [];
+    private readonly devices: Device[] = [];
     private readonly idKeys: nacl.BoxKeyPair;
-    private messages: IMessage[] = [];
+    private messages: Message[] = [];
     private nextOtkIndex = 1;
     private nextPreKeyIndex = 1;
     private oneTimeKeys: any[] = [];
     private preKeys: any[] = [];
-    private sessions: ISessionSQL[] = [];
+    private sessions: SessionSQL[] = [];
 
     constructor(SK: string) {
         super();
@@ -53,24 +53,24 @@ export class MemoryStorage extends EventEmitter implements IStorage {
         this.oneTimeKeys = this.oneTimeKeys.filter((k) => k.index !== index);
     }
 
-    async getAllSessions(): Promise<ISessionSQL[]> {
+    async getAllSessions(): Promise<SessionSQL[]> {
         return this.sessions.map((s) => ({
             ...s,
             verified: Boolean(s.verified),
         }));
     }
 
-    async getDevice(deviceID: string): Promise<IDevice | null> {
+    async getDevice(deviceID: string): Promise<Device | null> {
         return this.devices.find((d) => d.deviceID === deviceID) ?? null;
     }
 
-    async getGroupHistory(channelID: string): Promise<IMessage[]> {
+    async getGroupHistory(channelID: string): Promise<Message[]> {
         return this.messages
             .filter((m) => m.group === channelID)
             .map((m) => this.decryptMessage(m));
     }
 
-    async getMessageHistory(userID: string): Promise<IMessage[]> {
+    async getMessageHistory(userID: string): Promise<Message[]> {
         return this.messages
             .filter(
                 (m) =>
@@ -132,7 +132,7 @@ export class MemoryStorage extends EventEmitter implements IStorage {
 
     async markSessionUsed(sessionID: string): Promise<void> {
         const s = this.sessions.find((s) => s.sessionID === sessionID);
-        if (s) s.lastUsed = new Date();
+        if (s) s.lastUsed = new Date().toISOString();
     }
 
     async markSessionVerified(sessionID: string): Promise<void> {
@@ -151,13 +151,13 @@ export class MemoryStorage extends EventEmitter implements IStorage {
         this.messages = [];
     }
 
-    async saveDevice(device: IDevice): Promise<void> {
+    async saveDevice(device: Device): Promise<void> {
         if (!this.devices.find((d) => d.deviceID === device.deviceID)) {
             this.devices.push(device);
         }
     }
 
-    async saveMessage(message: IMessage): Promise<void> {
+    async saveMessage(message: Message): Promise<void> {
         const copy = { ...message };
         copy.message = XUtils.encodeHex(
             nacl.secretbox(
@@ -172,8 +172,8 @@ export class MemoryStorage extends EventEmitter implements IStorage {
     async savePreKeys(
         preKeys: IPreKeysCrypto[],
         oneTime: boolean,
-    ): Promise<IPreKeysSQL[]> {
-        const added: IPreKeysSQL[] = [];
+    ): Promise<PreKeysSQL[]> {
+        const added: PreKeysSQL[] = [];
         for (const pk of preKeys) {
             const idx = oneTime ? this.nextOtkIndex++ : this.nextPreKeyIndex++;
             const row = {
@@ -189,20 +189,20 @@ export class MemoryStorage extends EventEmitter implements IStorage {
                 index: idx,
                 publicKey: row.publicKey,
                 signature: row.signature,
-            } as IPreKeysSQL);
+            } as PreKeysSQL);
         }
         return added;
     }
 
-    async saveSession(session: ISessionSQL): Promise<void> {
+    async saveSession(session: SessionSQL): Promise<void> {
         if (!this.sessions.find((s) => s.SK === session.SK)) {
             this.sessions.push(session);
         }
     }
 
-    private decryptMessage(msg: IMessage): IMessage {
+    private decryptMessage(msg: Message): Message {
         const copy = { ...msg };
-        copy.timestamp = new Date(copy.timestamp);
+        // timestamp is already a string;
         copy.decrypted = Boolean(copy.decrypted);
         if (copy.decrypted) {
             const dec = nacl.secretbox.open(
@@ -215,7 +215,7 @@ export class MemoryStorage extends EventEmitter implements IStorage {
         return copy;
     }
 
-    private sqlToCrypto(s: ISessionSQL): ISessionCrypto {
+    private sqlToCrypto(s: SessionSQL): ISessionCrypto {
         return {
             fingerprint: XUtils.decodeHex(s.fingerprint),
             lastUsed: s.lastUsed,

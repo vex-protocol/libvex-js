@@ -1,9 +1,9 @@
-import type { IMessage } from "../index.js";
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
+import type { Message } from "../index.js";
+import type { Storage } from "../Storage.js";
+import type { Logger } from "../transport/types.js";
 import type { IPreKeysCrypto, ISessionCrypto } from "../types/index.js";
 import type { ClientDatabase } from "./schema.js";
-import type { IDevice, IPreKeysSQL, ISessionSQL } from "@vex-chat/types";
+import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 import type { Kysely } from "kysely";
 
 /**
@@ -21,14 +21,14 @@ import { XKeyConvert, XUtils } from "@vex-chat/crypto";
 import { EventEmitter } from "eventemitter3";
 import nacl from "tweetnacl";
 
-export class SqliteStorage extends EventEmitter implements IStorage {
+export class SqliteStorage extends EventEmitter implements Storage {
     public ready = false;
     private closing = false;
     private readonly db: Kysely<ClientDatabase>;
     private readonly idKeys: nacl.BoxKeyPair;
-    private readonly log: ILogger;
+    private readonly log: Logger;
 
-    constructor(db: Kysely<ClientDatabase>, SK: string, logger: ILogger) {
+    constructor(db: Kysely<ClientDatabase>, SK: string, logger: Logger) {
         super();
         this.db = db;
         this.log = logger;
@@ -100,7 +100,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             .execute();
     }
 
-    async getAllSessions(): Promise<ISessionSQL[]> {
+    async getAllSessions(): Promise<SessionSQL[]> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getAllSessions() will not complete.",
@@ -114,12 +114,12 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             .execute();
 
         return rows.map((s) => ({
-            ...(s as unknown as ISessionSQL),
+            ...(s as unknown as SessionSQL),
             verified: Boolean(s.verified),
         }));
     }
 
-    async getDevice(deviceID: string): Promise<IDevice | null> {
+    async getDevice(deviceID: string): Promise<Device | null> {
         const rows = await this.db
             .selectFrom("devices")
             .selectAll()
@@ -129,10 +129,10 @@ export class SqliteStorage extends EventEmitter implements IStorage {
         if (rows.length === 0) {
             return null;
         }
-        return rows[0] as unknown as IDevice;
+        return rows[0] as unknown as Device;
     }
 
-    async getGroupHistory(channelID: string): Promise<IMessage[]> {
+    async getGroupHistory(channelID: string): Promise<Message[]> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getGroupHistory() will not complete.",
@@ -150,7 +150,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
         return this.decryptMessages(messages);
     }
 
-    async getMessageHistory(userID: string): Promise<IMessage[]> {
+    async getMessageHistory(userID: string): Promise<Message[]> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, getMessageHistory() will not complete.",
@@ -260,7 +260,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             return null;
         }
 
-        return this.sqlToCrypto(rows[0] as unknown as ISessionSQL);
+        return this.sqlToCrypto(rows[0] as unknown as SessionSQL);
     }
 
     async getSessionByPublicKey(
@@ -288,7 +288,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             return null;
         }
 
-        return this.sqlToCrypto(rows[0] as unknown as ISessionSQL);
+        return this.sqlToCrypto(rows[0] as unknown as SessionSQL);
     }
 
     async init(): Promise<void> {
@@ -412,7 +412,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
         await this.db.deleteFrom("messages").execute();
     }
 
-    async saveDevice(device: IDevice): Promise<void> {
+    async saveDevice(device: Device): Promise<void> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, saveDevice() will not complete.",
@@ -442,7 +442,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
 
     // ── Devices ──────────────────────────────────────────────────────────────
 
-    async saveMessage(message: IMessage): Promise<void> {
+    async saveMessage(message: Message): Promise<void> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, saveMessage() will not complete.",
@@ -474,10 +474,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
                     readerID: message.readerID,
                     recipient: message.recipient,
                     sender: message.sender,
-                    timestamp:
-                        message.timestamp instanceof Date
-                            ? message.timestamp.toISOString()
-                            : String(message.timestamp),
+                    timestamp: message.timestamp,
                 })
                 .execute();
         } catch (err: any) {
@@ -493,7 +490,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
     async savePreKeys(
         preKeys: IPreKeysCrypto[],
         oneTime: boolean,
-    ): Promise<IPreKeysSQL[]> {
+    ): Promise<PreKeysSQL[]> {
         await this.untilReady();
         if (this.closing) {
             this.log.warn(
@@ -525,7 +522,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             .where("index", "in", addedIndexes)
             .execute();
 
-        return (rows as unknown as IPreKeysSQL[]).map((key) => {
+        return (rows as unknown as PreKeysSQL[]).map((key) => {
             delete key.privateKey;
             return key;
         });
@@ -533,7 +530,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
 
     // ── Purge ────────────────────────────────────────────────────────────────
 
-    async saveSession(session: ISessionSQL): Promise<void> {
+    async saveSession(session: SessionSQL): Promise<void> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, saveSession() will not complete.",
@@ -546,10 +543,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
                 .values({
                     deviceID: session.deviceID,
                     fingerprint: session.fingerprint,
-                    lastUsed:
-                        session.lastUsed instanceof Date
-                            ? session.lastUsed.toISOString()
-                            : String(session.lastUsed),
+                    lastUsed: session.lastUsed,
                     mode: session.mode,
                     publicKey: session.publicKey,
                     sessionID: session.sessionID,
@@ -569,7 +563,7 @@ export class SqliteStorage extends EventEmitter implements IStorage {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private decryptMessages(messages: any[]): IMessage[] {
+    private decryptMessages(messages: any[]): Message[] {
         return messages.map((msg) => {
             msg.timestamp = new Date(msg.timestamp);
             msg.decrypted = Boolean(msg.decrypted);
@@ -587,11 +581,11 @@ export class SqliteStorage extends EventEmitter implements IStorage {
                     throw new Error("Couldn't decrypt messages on disk!");
                 }
             }
-            return msg as IMessage;
+            return msg as Message;
         });
     }
 
-    private sqlToCrypto(session: ISessionSQL): ISessionCrypto {
+    private sqlToCrypto(session: SessionSQL): ISessionCrypto {
         return {
             fingerprint: XUtils.decodeHex(session.fingerprint),
             lastUsed: session.lastUsed,

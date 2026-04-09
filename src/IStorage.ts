@@ -1,6 +1,6 @@
-import type { IMessage, ISession } from "./index.js";
+import type { Message, Session } from "./index.js";
 import type { IPreKeysCrypto, ISessionCrypto } from "./types/index.js";
-import type { IDevice, IPreKeysSQL } from "@vex-chat/types";
+import type { Device, PreKeysSQL } from "@vex-chat/types";
 import type { EventEmitter } from "eventemitter3";
 /**
  * Storage contract used by `Client` for local persistence.
@@ -14,7 +14,7 @@ import type { EventEmitter } from "eventemitter3";
  * - Managing prekeys / one-time keys used for session setup
  * - Emitting lifecycle events (`ready`, `error`)
  */
-export interface IStorage extends EventEmitter {
+export interface Storage extends EventEmitter {
     /** Closes storage resources (connections, handles, transactions, etc.). */
     close: () => Promise<void>;
     /**
@@ -34,11 +34,11 @@ export interface IStorage extends EventEmitter {
     /** Deletes one one-time key by index. */
     deleteOneTimeKey: (index: number) => Promise<void>;
     /** Returns all known encryption sessions. */
-    getAllSessions: () => Promise<ISession[]>;
+    getAllSessions: () => Promise<Session[]>;
     /** Gets one device record by ID. */
-    getDevice: (deviceID: string) => Promise<IDevice | null>;
+    getDevice: (deviceID: string) => Promise<Device | null>;
     /** Returns group-message history for a channel. */
-    getGroupHistory: (channelID: string) => Promise<IMessage[]>;
+    getGroupHistory: (channelID: string) => Promise<Message[]>;
     /**
      * Returns direct-message history for a user.
      *
@@ -47,7 +47,7 @@ export interface IStorage extends EventEmitter {
      * const history = await storage.getMessageHistory(userID);
      * ```
      */
-    getMessageHistory: (userID: string) => Promise<IMessage[]>;
+    getMessageHistory: (userID: string) => Promise<Message[]>;
     /** Fetches one one-time key by index. */
     getOneTimeKey: (index: number) => Promise<IPreKeysCrypto | null>;
     /**
@@ -96,7 +96,7 @@ export interface IStorage extends EventEmitter {
      */
     ready: boolean;
     /** Saves a device record. */
-    saveDevice: (device: IDevice) => Promise<void>;
+    saveDevice: (device: Device) => Promise<void>;
     /**
      * Persists one chat message.
      *
@@ -105,7 +105,7 @@ export interface IStorage extends EventEmitter {
      * await storage.saveMessage(message);
      * ```
      */
-    saveMessage: (message: IMessage) => Promise<void>;
+    saveMessage: (message: Message) => Promise<void>;
 
     /**
      * Saves signed prekeys.
@@ -116,7 +116,7 @@ export interface IStorage extends EventEmitter {
     savePreKeys: (
         preKeys: IPreKeysCrypto[],
         oneTime: boolean,
-    ) => Promise<IPreKeysSQL[]>;
+    ) => Promise<PreKeysSQL[]>;
     /** Persists an encryption session. */
-    saveSession: (session: ISession) => Promise<void>;
+    saveSession: (session: Session) => Promise<void>;
 }

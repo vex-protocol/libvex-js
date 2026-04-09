@@ -1,5 +1,5 @@
-import type { IStorage } from "../IStorage.js";
-import type { IClientAdapters, ILogger } from "../transport/types.js";
+import type { Storage } from "../Storage.js";
+import type { ClientAdapters, Logger } from "../transport/types.js";
 
 /**
  * Bundles platform-specific adapters + storage factory.
@@ -9,11 +9,11 @@ import type { IClientAdapters, ILogger } from "../transport/types.js";
  * so app code stays a one-liner.
  */
 export interface PlatformPreset {
-    adapters: IClientAdapters;
+    adapters: ClientAdapters;
     createStorage(
         dbName: string,
         privateKey: string,
-        logger: ILogger,
-    ): Promise<IStorage>;
+        logger: Logger,
+    ): Promise<Storage>;
     deviceName: string;
 }
