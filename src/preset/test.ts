@@ -28,7 +28,7 @@ export function testPreset(WebSocket: WebSocketCtor): PlatformPreset {
             logger,
             WebSocket,
         },
-        async createStorage(dbName, privateKey, _logger) {
+        async createStorage(_dbName, privateKey, _logger) {
             // Lazy import to avoid pulling eventemitter3 into the type graph
             const { MemoryStorage } =
                 await import("../__tests__/harness/memory-storage.js");

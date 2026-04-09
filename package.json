@@ -115,8 +115,8 @@
     },
     "dependencies": {
         "@extrahash/sleep": "^1.0.0",
-        "@vex-chat/crypto": "^1.1.1",
-        "@vex-chat/types": "^2.0.0-rc.0",
+        "@vex-chat/crypto": "file:../crypto-js",
+        "@vex-chat/types": "^2.0.0-rc.1",
         "axios": "^1.7.0",
         "eventemitter3": "^5.0.4",
         "kysely": "^0.28.15",

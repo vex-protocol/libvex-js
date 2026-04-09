@@ -28,6 +28,6 @@ export function createNodeStorage(
         warn() {},
     };
     const storage = new SqliteStorage(db, SK, log);
-    storage.init();
+    void storage.init();
     return storage;
 }

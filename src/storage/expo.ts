@@ -18,9 +18,11 @@ export async function createExpoStorage(
     logger: Logger,
 ): Promise<Storage> {
     const { ExpoDialect } = await import("kysely-expo");
+    /* eslint-disable @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- Kysely does not export its Dialect interface; ExpoDialect implements it at runtime */
     const db = new Kysely<ClientDatabase>({
         dialect: new ExpoDialect({ database: dbName }) as any,
     });
+    /* eslint-enable @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
     const storage = new SqliteStorage(db, SK, logger);
     await storage.init();
     return storage;

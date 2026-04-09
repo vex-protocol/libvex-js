@@ -7,8 +7,6 @@
  * decode() returns typed data without runtime validation (SDK trusts server).
  * For trust boundary validation, use codec.decodeSafe() directly.
  */
-import { z } from "zod/v4";
-
 import {
     actionToken,
     channel,
@@ -21,6 +19,8 @@ import {
     server,
     user,
 } from "@vex-chat/types";
+
+import { z } from "zod/v4";
 
 import { createCodec } from "./codec.js";
 
@@ -75,20 +75,22 @@ export const WhoamiCodec = createCodec(
     }),
 );
 
-export const OtkCountCodec = createCodec(
-    z.object({ count: z.number() }),
-);
+export const OtkCountCodec = createCodec(z.object({ count: z.number() }));
 
 // ── Helper: decode axios response buffer ────────────────────────────────────
 
 /**
  * Decode an axios arraybuffer response with a typed codec.
- * Uses decode (typed but not validated) — SDK trusts its own server.
- * For trust boundary validation (Spire), use decodeSafe() directly.
+ * Uses decodeSafe (Zod-validated) so schema mismatches surface immediately.
  */
 export function decodeAxios<T>(
-    codec: { decode: (data: Uint8Array) => T },
-    data: ArrayBuffer,
+    codec: { decodeSafe: (data: Uint8Array) => T },
+    /**
+     * Accepts `unknown` because axios types its `responseType: 'arraybuffer'`
+     * responses as `any`. At runtime this is always an `ArrayBuffer`.
+     */
+    data: unknown,
 ): T {
-    return codec.decode(new Uint8Array(data));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- axios arraybuffer response is ArrayBuffer at runtime
+    return codec.decodeSafe(new Uint8Array(data as ArrayBuffer));
 }

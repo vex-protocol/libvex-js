@@ -1,3 +1,4 @@
+import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
 import type { PlatformPreset } from "./types.js";
 
@@ -29,11 +30,21 @@ export function tauriPreset(): PlatformPreset {
     return {
         adapters: {
             logger,
-            WebSocket: BrowserWebSocket as any,
+            WebSocket: BrowserWebSocket,
         },
-        async createStorage(dbName, privateKey, _logger) {
+        async createStorage(
+            dbName,
+            privateKey,
+            storageLogger,
+        ): Promise<Storage> {
             const { createTauriStorage } = await import("../storage/tauri.js");
-            return createTauriStorage(dbName, privateKey, _logger ?? logger);
+
+            const storage: Storage = await createTauriStorage(
+                dbName,
+                privateKey,
+                storageLogger,
+            );
+            return storage;
         },
         deviceName: navigator.platform,
     };

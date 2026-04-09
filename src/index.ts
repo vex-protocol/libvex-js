@@ -6,7 +6,6 @@ export type {
     Device,
     Devices,
     Emojis,
-    VexFile,
     FileProgress,
     FileRes,
     Files,
@@ -24,15 +23,16 @@ export type {
     Sessions,
     User,
     Users,
+    VexFile,
 } from "./Client.js";
 export { createCodec, msgpack } from "./codec.js";
-export type { Storage } from "./Storage.js";
-
 export type { PlatformPreset } from "./preset/types.js";
+export type { Storage } from "./Storage.js";
 export type {
     ClientAdapters,
     Logger,
     WebSocketCtor,
+    WebSocketEventMap,
     WebSocketLike,
 } from "./transport/types.js";
 export type { KeyStore, StoredCredentials } from "./types/index.js";

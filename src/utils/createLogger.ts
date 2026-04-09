@@ -1,5 +1,3 @@
-import type { ClientOptions } from "../index.js";
-
 import winston from "winston";
 
 /**

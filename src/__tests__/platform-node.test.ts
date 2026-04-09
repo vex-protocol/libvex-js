@@ -6,5 +6,5 @@ import { nodeTestAdapters } from "./harness/platform-transports.js";
 import { platformSuite } from "./harness/shared-suite.js";
 
 platformSuite("node", nodeTestAdapters, (SK: string, _opts: ClientOptions) =>
-    createNodeStorage(":memory:", SK),
+    Promise.resolve(createNodeStorage(":memory:", SK)),
 );

@@ -31,7 +31,10 @@ class BrowserTestWS implements WebSocketLike {
     get readyState() {
         return this.ws.readyState;
     }
-    private readonly messageListeners = new Map<Function, (...args: any[]) => void>();
+    private readonly messageListeners = new Map<
+        (...args: any[]) => void,
+        (...args: any[]) => void
+    >();
 
     private readonly ws: WebSocket;
 
@@ -55,7 +58,9 @@ class BrowserTestWS implements WebSocketLike {
     }
     on(event: string, listener: (...args: any[]) => void) {
         if (event === "message") {
-            const wrapped = (data: Buffer) => { listener(new Uint8Array(data)); };
+            const wrapped = (data: Buffer) => {
+                listener(new Uint8Array(data));
+            };
             this.messageListeners.set(listener, wrapped);
             this.ws.on("message", wrapped);
         } else {

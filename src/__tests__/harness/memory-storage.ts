@@ -34,130 +34,147 @@ export class MemoryStorage extends EventEmitter implements Storage {
         this.idKeys = idKeys;
     }
 
-    async close(): Promise<void> {}
+    close(): Promise<void> {
+        return Promise.resolve();
+    }
 
-    async deleteHistory(channelOrUserID: string): Promise<void> {
+    deleteHistory(channelOrUserID: string): Promise<void> {
         this.messages = this.messages.filter(
             (m) =>
                 m.group !== channelOrUserID &&
                 m.authorID !== channelOrUserID &&
                 m.readerID !== channelOrUserID,
         );
+        return Promise.resolve();
     }
 
-    async deleteMessage(mailID: string): Promise<void> {
+    deleteMessage(mailID: string): Promise<void> {
         this.messages = this.messages.filter((m) => m.mailID !== mailID);
+        return Promise.resolve();
     }
 
-    async deleteOneTimeKey(index: number): Promise<void> {
+    deleteOneTimeKey(index: number): Promise<void> {
         this.oneTimeKeys = this.oneTimeKeys.filter((k) => k.index !== index);
+        return Promise.resolve();
     }
 
-    async getAllSessions(): Promise<SessionSQL[]> {
-        return this.sessions.map((s) => ({
-            ...s,
-            verified: Boolean(s.verified),
-        }));
+    getAllSessions(): Promise<SessionSQL[]> {
+        return Promise.resolve(
+            this.sessions.map((s) => ({
+                ...s,
+                verified: s.verified,
+            })),
+        );
     }
 
-    async getDevice(deviceID: string): Promise<Device | null> {
-        return this.devices.find((d) => d.deviceID === deviceID) ?? null;
+    getDevice(deviceID: string): Promise<Device | null> {
+        return Promise.resolve(
+            this.devices.find((d) => d.deviceID === deviceID) ?? null,
+        );
     }
 
-    async getGroupHistory(channelID: string): Promise<Message[]> {
-        return this.messages
-            .filter((m) => m.group === channelID)
-            .map((m) => this.decryptMessage(m));
+    getGroupHistory(channelID: string): Promise<Message[]> {
+        return Promise.resolve(
+            this.messages
+                .filter((m) => m.group === channelID)
+                .map((m) => this.decryptMessage(m)),
+        );
     }
 
-    async getMessageHistory(userID: string): Promise<Message[]> {
-        return this.messages
-            .filter(
-                (m) =>
-                    (m.direction === "incoming" &&
-                        m.authorID === userID &&
-                        !m.group) ||
-                    (m.direction === "outgoing" &&
-                        m.readerID === userID &&
-                        !m.group),
-            )
-            .map((m) => this.decryptMessage(m));
+    getMessageHistory(userID: string): Promise<Message[]> {
+        return Promise.resolve(
+            this.messages
+                .filter(
+                    (m) =>
+                        (m.direction === "incoming" &&
+                            m.authorID === userID &&
+                            !m.group) ||
+                        (m.direction === "outgoing" &&
+                            m.readerID === userID &&
+                            !m.group),
+                )
+                .map((m) => this.decryptMessage(m)),
+        );
     }
 
-    async getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
+    getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
         const otk = this.oneTimeKeys.find((k) => k.index === index);
-        if (!otk || !otk.privateKey) return null;
-        return {
+        if (!otk || !otk.privateKey) return Promise.resolve(null);
+        return Promise.resolve({
             index: otk.index,
             keyPair: nacl.box.keyPair.fromSecretKey(
                 XUtils.decodeHex(otk.privateKey),
             ),
             signature: XUtils.decodeHex(otk.signature),
-        };
+        });
     }
 
-    async getPreKeys(): Promise<IPreKeysCrypto | null> {
-        if (this.preKeys.length === 0) return null;
+    getPreKeys(): Promise<IPreKeysCrypto | null> {
+        if (this.preKeys.length === 0) return Promise.resolve(null);
         const pk = this.preKeys[0];
-        if (!pk.privateKey) return null;
-        return {
+        if (!pk.privateKey) return Promise.resolve(null);
+        return Promise.resolve({
             keyPair: nacl.box.keyPair.fromSecretKey(
                 XUtils.decodeHex(pk.privateKey),
             ),
             signature: XUtils.decodeHex(pk.signature),
-        };
+        });
     }
 
-    async getSessionByDeviceID(
-        deviceID: string,
-    ): Promise<ISessionCrypto | null> {
+    getSessionByDeviceID(deviceID: string): Promise<ISessionCrypto | null> {
         const s = this.sessions.find((s) => s.deviceID === deviceID);
-        if (!s) return null;
-        return this.sqlToCrypto(s);
+        if (!s) return Promise.resolve(null);
+        return Promise.resolve(this.sqlToCrypto(s));
     }
 
-    async getSessionByPublicKey(
+    getSessionByPublicKey(
         publicKey: Uint8Array,
     ): Promise<ISessionCrypto | null> {
         const hex = XUtils.encodeHex(publicKey);
         const s = this.sessions.find((s) => s.publicKey === hex);
-        if (!s) return null;
-        return this.sqlToCrypto(s);
+        if (!s) return Promise.resolve(null);
+        return Promise.resolve(this.sqlToCrypto(s));
     }
 
-    async init(): Promise<void> {
+    init(): Promise<void> {
         this.ready = true;
         this.emit("ready");
+        return Promise.resolve();
     }
 
-    async markSessionUsed(sessionID: string): Promise<void> {
+    markSessionUsed(sessionID: string): Promise<void> {
         const s = this.sessions.find((s) => s.sessionID === sessionID);
         if (s) s.lastUsed = new Date().toISOString();
+        return Promise.resolve();
     }
 
-    async markSessionVerified(sessionID: string): Promise<void> {
+    markSessionVerified(sessionID: string): Promise<void> {
         const s = this.sessions.find((s) => s.sessionID === sessionID);
         if (s) s.verified = true;
+        return Promise.resolve();
     }
 
-    async purgeHistory(): Promise<void> {
+    purgeHistory(): Promise<void> {
         this.messages = [];
+        return Promise.resolve();
     }
 
-    async purgeKeyData(): Promise<void> {
+    purgeKeyData(): Promise<void> {
         this.sessions = [];
         this.preKeys = [];
         this.oneTimeKeys = [];
         this.messages = [];
+        return Promise.resolve();
     }
 
-    async saveDevice(device: Device): Promise<void> {
+    saveDevice(device: Device): Promise<void> {
         if (!this.devices.find((d) => d.deviceID === device.deviceID)) {
             this.devices.push(device);
         }
+        return Promise.resolve();
     }
 
-    async saveMessage(message: Message): Promise<void> {
+    saveMessage(message: Message): Promise<void> {
         const copy = { ...message };
         copy.message = XUtils.encodeHex(
             nacl.secretbox(
@@ -167,9 +184,10 @@ export class MemoryStorage extends EventEmitter implements Storage {
             ),
         );
         this.messages.push(copy);
+        return Promise.resolve();
     }
 
-    async savePreKeys(
+    savePreKeys(
         preKeys: IPreKeysCrypto[],
         oneTime: boolean,
     ): Promise<PreKeysSQL[]> {
@@ -191,19 +209,18 @@ export class MemoryStorage extends EventEmitter implements Storage {
                 signature: row.signature,
             } as PreKeysSQL);
         }
-        return added;
+        return Promise.resolve(added);
     }
 
-    async saveSession(session: SessionSQL): Promise<void> {
+    saveSession(session: SessionSQL): Promise<void> {
         if (!this.sessions.find((s) => s.SK === session.SK)) {
             this.sessions.push(session);
         }
+        return Promise.resolve();
     }
 
     private decryptMessage(msg: Message): Message {
         const copy = { ...msg };
-        // timestamp is already a string;
-        copy.decrypted = Boolean(copy.decrypted);
         if (copy.decrypted) {
             const dec = nacl.secretbox.open(
                 XUtils.decodeHex(copy.message),

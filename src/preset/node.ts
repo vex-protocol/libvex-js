@@ -1,3 +1,4 @@
+import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
 /**
  * Platform preset for Node.js (CLI tools, bots, tests).
@@ -12,18 +13,29 @@ import type { Logger } from "../transport/types.js";
 import type { PlatformPreset } from "./types.js";
 
 export async function nodePreset(logLevel?: string): Promise<PlatformPreset> {
-    const { default: WebSocket } = await import("ws");
+    const { default: WS } = await import("ws");
+    const { createNodeWebSocket } = await import("../transport/node.js");
     const { createLogger } = await import("../utils/createLogger.js");
     const logger: Logger = createLogger("libvex", logLevel);
 
     return {
         adapters: {
             logger,
-            WebSocket: WebSocket as any,
+            WebSocket: createNodeWebSocket(WS),
         },
-        async createStorage(dbName, privateKey, _logger) {
+        async createStorage(
+            dbName,
+            privateKey,
+            storageLogger,
+        ): Promise<Storage> {
             const { createNodeStorage } = await import("../storage/node.js");
-            return createNodeStorage(dbName, privateKey, _logger ?? logger);
+
+            const storage: Storage = createNodeStorage(
+                dbName,
+                privateKey,
+                storageLogger,
+            );
+            return storage;
         },
         deviceName: process.platform,
     };

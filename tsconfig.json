@@ -13,7 +13,7 @@
         "rootDir": "./src",
 
         "strict": true,
-        "useUnknownInCatchVariables": false,
+        "useUnknownInCatchVariables": true,
         "noImplicitReturns": true,
         "noImplicitOverride": true,
         "noFallthroughCasesInSwitch": true,

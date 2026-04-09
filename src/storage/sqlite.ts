@@ -2,9 +2,14 @@ import type { Message } from "../index.js";
 import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
 import type { IPreKeysCrypto, ISessionCrypto } from "../types/index.js";
-import type { ClientDatabase } from "./schema.js";
+import type {
+    ClientDatabase,
+    DeviceRow,
+    MessageRow,
+    SessionRow,
+} from "./schema.js";
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
-import type { Kysely } from "kysely";
+import type { Insertable, Kysely } from "kysely";
 
 /**
  * Unified Kysely-based SQLite storage implementation.
@@ -113,10 +118,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .orderBy("lastUsed", "desc")
             .execute();
 
-        return rows.map((s) => ({
-            ...(s as unknown as SessionSQL),
-            verified: Boolean(s.verified),
-        }));
+        return rows.map((s) => this.sessionRowToSQL(s));
     }
 
     async getDevice(deviceID: string): Promise<Device | null> {
@@ -129,7 +131,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         if (rows.length === 0) {
             return null;
         }
-        return rows[0] as unknown as Device;
+        return this.deviceRowToDevice(rows[0]);
     }
 
     async getGroupHistory(channelID: string): Promise<Message[]> {
@@ -260,7 +262,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             return null;
         }
 
-        return this.sqlToCrypto(rows[0] as unknown as SessionSQL);
+        return this.sqlToCrypto(this.sessionRowToSQL(rows[0]));
     }
 
     async getSessionByPublicKey(
@@ -288,7 +290,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             return null;
         }
 
-        return this.sqlToCrypto(rows[0] as unknown as SessionSQL);
+        return this.sqlToCrypto(this.sessionRowToSQL(rows[0]));
     }
 
     async init(): Promise<void> {
@@ -367,7 +369,10 @@ export class SqliteStorage extends EventEmitter implements Storage {
             this.ready = true;
             this.emit("ready");
         } catch (err) {
-            this.emit("error", err);
+            this.emit(
+                "error",
+                err instanceof Error ? err : new Error(String(err)),
+            );
         }
     }
 
@@ -423,16 +428,16 @@ export class SqliteStorage extends EventEmitter implements Storage {
             await this.db
                 .insertInto("devices")
                 .values({
-                    deleted: (device as any).deleted ? 1 : 0,
+                    deleted: device.deleted ? 1 : 0,
                     deviceID: device.deviceID,
-                    lastLogin: (device as any).lastLogin,
-                    name: (device as any).name,
-                    owner: (device as any).owner,
+                    lastLogin: device.lastLogin,
+                    name: device.name,
+                    owner: device.owner,
                     signKey: device.signKey,
                 })
                 .execute();
-        } catch (err: any) {
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
+        } catch (err) {
+            if (this.isDuplicateError(err)) {
                 this.log.warn("Attempted to insert duplicate deviceID");
             } else {
                 throw err;
@@ -477,9 +482,8 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     timestamp: message.timestamp,
                 })
                 .execute();
-        } catch (err: any) {
-            if (this.closing) return;
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
+        } catch (err) {
+            if (this.isDuplicateError(err)) {
                 this.log.warn("Duplicate nonce in message table.");
             } else {
                 throw err;
@@ -505,11 +509,12 @@ export class SqliteStorage extends EventEmitter implements Storage {
         for (const preKey of preKeys) {
             const result = await this.db
                 .insertInto(table)
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Kysely Insertable requires all non-Generated columns; SQLite allows omitting TEXT columns with implicit NULL
                 .values({
                     privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
-                } as any)
+                } as Insertable<ClientDatabase[typeof table]>)
                 .executeTakeFirst();
             if (result.insertId !== undefined) {
                 addedIndexes.push(Number(result.insertId));
@@ -522,10 +527,16 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .where("index", "in", addedIndexes)
             .execute();
 
-        return (rows as unknown as PreKeysSQL[]).map((key) => {
-            delete key.privateKey;
-            return key;
-        });
+        return rows.map(
+            (row): PreKeysSQL => ({
+                deviceID: row.deviceID,
+                index: row.index,
+                keyID: row.keyID,
+                publicKey: row.publicKey,
+                signature: row.signature,
+                userID: row.userID,
+            }),
+        );
     }
 
     // ── Purge ────────────────────────────────────────────────────────────────
@@ -552,8 +563,8 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     verified: session.verified ? 1 : 0,
                 })
                 .execute();
-        } catch (err: any) {
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
+        } catch (err) {
+            if (this.isDuplicateError(err)) {
                 this.log.warn("Attempted to insert duplicate SK");
             } else {
                 throw err;
@@ -563,26 +574,77 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private decryptMessages(messages: any[]): Message[] {
-        return messages.map((msg) => {
-            msg.timestamp = new Date(msg.timestamp);
-            msg.decrypted = Boolean(msg.decrypted);
-            msg.forward = Boolean(msg.forward);
+    private decryptMessages(messages: MessageRow[]): Message[] {
+        return messages.map((msg): Message => {
+            const decryptedFlag = msg.decrypted !== 0;
+            let plaintext = msg.message;
 
-            if (msg.decrypted) {
+            if (decryptedFlag) {
                 const decrypted = nacl.secretbox.open(
                     XUtils.decodeHex(msg.message),
                     XUtils.decodeHex(msg.nonce),
                     this.idKeys.secretKey,
                 );
                 if (decrypted) {
-                    msg.message = XUtils.encodeUTF8(decrypted);
+                    plaintext = XUtils.encodeUTF8(decrypted);
                 } else {
                     throw new Error("Couldn't decrypt messages on disk!");
                 }
             }
-            return msg as Message;
+
+            const direction =
+                msg.direction === "incoming" ? "incoming" : "outgoing";
+
+            return {
+                authorID: msg.authorID,
+                decrypted: decryptedFlag,
+                direction,
+                forward: msg.forward !== 0,
+                group: msg.group,
+                mailID: msg.mailID,
+                message: plaintext,
+                nonce: msg.nonce,
+                readerID: msg.readerID,
+                recipient: msg.recipient,
+                sender: msg.sender,
+                timestamp: msg.timestamp,
+            };
         });
+    }
+
+    private deviceRowToDevice(row: DeviceRow): Device {
+        return {
+            deleted: row.deleted !== 0,
+            deviceID: row.deviceID,
+            lastLogin: row.lastLogin,
+            name: row.name,
+            owner: row.owner,
+            signKey: row.signKey,
+        };
+    }
+
+    private isDuplicateError(err: unknown): boolean {
+        if (err instanceof Error) {
+            return err.message.includes("UNIQUE");
+        }
+        if (typeof err === "object" && err !== null && "errno" in err) {
+            return err.errno === 19;
+        }
+        return false;
+    }
+
+    private sessionRowToSQL(row: SessionRow): SessionSQL {
+        return {
+            deviceID: row.deviceID,
+            fingerprint: row.fingerprint,
+            lastUsed: row.lastUsed,
+            mode: row.mode === "initiator" ? "initiator" : "receiver",
+            publicKey: row.publicKey,
+            sessionID: row.sessionID,
+            SK: row.SK,
+            userID: row.userID,
+            verified: row.verified !== 0,
+        };
     }
 
     private sqlToCrypto(session: SessionSQL): ISessionCrypto {
@@ -601,7 +663,10 @@ export class SqliteStorage extends EventEmitter implements Storage {
         if (this.ready) return;
         return new Promise((resolve) => {
             const check = () => {
-                if (this.ready) { resolve(); return; }
+                if (this.ready) {
+                    resolve();
+                    return;
+                }
                 setTimeout(check, 10);
             };
             check();

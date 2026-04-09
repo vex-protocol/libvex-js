@@ -28,7 +28,7 @@ const IMPORT_RE = /(?:import|export)\s+.*?\s+from\s+['"]([^'"]+)['"]/g;
 // Matches: await import("events")
 const DYNAMIC_IMPORT_RE = /import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
-type Violation = { kind: "global" | "import"; line: number; name: string; };
+type Violation = { kind: "global" | "import"; line: number; name: string };
 
 export function poisonNodeImports(): Plugin {
     return {
@@ -46,7 +46,7 @@ export function poisonNodeImports(): Plugin {
 
             const file = id.replace(/^.*\/src\//, "src/");
             const msgs = violations
-                .map((v) => `  line ${v.line}: ${v.name} (${v.kind})`)
+                .map((v) => `  line ${String(v.line)}: ${v.name} (${v.kind})`)
                 .join("\n");
             throw new Error(
                 `[platform-guard] Node-only code in ${file}:\n${msgs}\n` +

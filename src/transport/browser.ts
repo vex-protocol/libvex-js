@@ -4,12 +4,14 @@
  */
 import type { WebSocketLike } from "./types.js";
 
+type AnyListener = (...args: never[]) => void;
+
 export class BrowserWebSocket implements WebSocketLike {
-    onerror: ((err: any) => void) | null = null;
+    onerror: ((err: Error | Event) => void) | null = null;
     get readyState() {
         return this.ws.readyState;
     }
-    private readonly listeners = new Map<string, Map<Function, (ev: any) => void>>();
+    private readonly wrappedListeners = new Map<AnyListener, EventListener>();
 
     private readonly ws: WebSocket;
 
@@ -23,41 +25,57 @@ export class BrowserWebSocket implements WebSocketLike {
         this.ws.close();
     }
 
-    off(event: string, listener: (...args: any[]) => void) {
-        const wrapped = this.listeners.get(event)?.get(listener);
+    off(event: "close" | "open", listener: () => void): void;
+    off(event: "error", listener: (error: Error) => void): void;
+    off(event: "message", listener: (data: Uint8Array) => void): void;
+    off(event: string, listener: AnyListener): void {
+        const wrapped = this.wrappedListeners.get(listener);
         if (wrapped) {
-            this.ws.removeEventListener(event, wrapped as any);
-            this.listeners.get(event)!.delete(listener);
+            this.ws.removeEventListener(event, wrapped);
+            this.wrappedListeners.delete(listener);
         }
     }
 
-    on(event: string, listener: (...args: any[]) => void) {
-        let wrapped: (ev: any) => void;
+    on(event: "close" | "open", listener: () => void): void;
+    on(event: "error", listener: (error: Error) => void): void;
+    on(event: "message", listener: (data: Uint8Array) => void): void;
+    /* eslint-disable @typescript-eslint/no-unsafe-type-assertion --
+       Event-dispatch narrowing: implementation dispatches by event name,
+       so casts from AnyListener to the specific handler type are safe. */
+    on(event: string, listener: AnyListener): void {
+        let wrapped: EventListener;
 
         if (event === "message") {
-            // Browser WebSocket wraps data in MessageEvent — unwrap to Uint8Array
             wrapped = (ev: Event) => {
-                const data = (ev as MessageEvent).data;
-                if (data instanceof ArrayBuffer) {
-                    listener(new Uint8Array(data));
-                } else {
-                    listener(data);
+                // Browser WebSocket wraps binary data in MessageEvent
+                if (
+                    ev instanceof MessageEvent &&
+                    ev.data instanceof ArrayBuffer
+                ) {
+                    (listener as unknown as (data: Uint8Array) => void)(
+                        new Uint8Array(ev.data),
+                    );
                 }
             };
-        } else if (event === "open" || event === "close" || event === "error") {
-            wrapped = () => { listener(); };
+        } else if (event === "error") {
+            wrapped = (ev: Event) => {
+                (listener as unknown as (error: Error) => void)(
+                    ev instanceof Error ? ev : new Error("WebSocket error"),
+                );
+            };
         } else {
-            wrapped = (ev: Event) => { listener(ev); };
+            // "open" | "close"
+            wrapped = () => {
+                (listener as unknown as () => void)();
+            };
         }
 
-        if (!this.listeners.has(event)) {
-            this.listeners.set(event, new Map());
-        }
-        this.listeners.get(event)!.set(listener, wrapped);
+        this.wrappedListeners.set(listener, wrapped);
         this.ws.addEventListener(event, wrapped);
     }
+    /* eslint-enable @typescript-eslint/no-unsafe-type-assertion */
 
-    send(data: any) {
+    send(data: Uint8Array) {
         this.ws.send(data);
     }
 

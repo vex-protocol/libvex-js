@@ -26,6 +26,15 @@ export default tseslint.config(
             "@typescript-eslint/no-import-type-side-effects": "error",
             "@typescript-eslint/prefer-readonly": "error",
             "@typescript-eslint/require-array-sort-compare": "error",
+            "@typescript-eslint/no-unused-vars": [
+                "error",
+                {
+                    args: "all",
+                    argsIgnorePattern: "^_",
+                    caughtErrorsIgnorePattern: "^_",
+                    varsIgnorePattern: "^_",
+                },
+            ],
 
             "perfectionist/sort-imports": [
                 "error",

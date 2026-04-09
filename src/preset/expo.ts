@@ -1,3 +1,4 @@
+import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
 import type { PlatformPreset } from "./types.js";
 
@@ -33,11 +34,21 @@ export function expoPreset(): PlatformPreset {
     return {
         adapters: {
             logger,
-            WebSocket: BrowserWebSocket as any,
+            WebSocket: BrowserWebSocket,
         },
-        async createStorage(dbName, privateKey, _logger) {
+        async createStorage(
+            dbName,
+            privateKey,
+            storageLogger,
+        ): Promise<Storage> {
             const { createExpoStorage } = await import("../storage/expo.js");
-            return createExpoStorage(dbName, privateKey, _logger ?? logger);
+
+            const storage: Storage = await createExpoStorage(
+                dbName,
+                privateKey,
+                storageLogger,
+            );
+            return storage;
         },
         deviceName: Platform.OS,
     };

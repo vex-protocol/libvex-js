@@ -14,10 +14,11 @@ import { msgpack } from "../codec.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const hex = (len: number) => fc.stringMatching(new RegExp(`^[0-9a-f]{${len}}$`));
+const hex = (len: number) =>
+    fc.stringMatching(new RegExp(`^[0-9a-f]{${String(len)}}$`));
 const hexVar = (min: number, max: number) =>
-    fc.stringMatching(new RegExp(`^[0-9a-f]{${min},${max}}$`));
-const rec = <T extends Record<string, fc.Arbitrary<unknown>>>(arbs: T) =>
+    fc.stringMatching(new RegExp(`^[0-9a-f]{${String(min)},${String(max)}}$`));
+const rec = (arbs: Record<string, fc.Arbitrary<unknown>>) =>
     fc.record(arbs, { noNullPrototype: true });
 
 // ── Arbitraries ──────────────────────────────────────────────────────────────
@@ -28,14 +29,21 @@ const arbBaseMsg = rec({
 });
 
 const arbSuccessMsg = rec({
-    data: fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown),
+    data: fc
+        .jsonValue({ maxDepth: 1 })
+        .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
     timestamp: fc.option(fc.string(), { nil: null }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("success"),
 });
 
 const arbErrMsg = rec({
-    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
+    data: fc.option(
+        fc
+            .jsonValue({ maxDepth: 1 })
+            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
+        { nil: null },
+    ),
     error: fc.string({ minLength: 1 }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("error"),
@@ -43,14 +51,24 @@ const arbErrMsg = rec({
 
 const arbResourceMsg = rec({
     action: fc.constantFrom("CREATE", "RETRIEVE", "UPDATE", "DELETE"),
-    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
+    data: fc.option(
+        fc
+            .jsonValue({ maxDepth: 1 })
+            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
+        { nil: null },
+    ),
     resourceType: fc.constantFrom("mail", "preKeys", "otk"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("resource"),
 });
 
 const arbNotifyMsg = rec({
-    data: fc.option(fc.jsonValue({ maxDepth: 1 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown), { nil: null }),
+    data: fc.option(
+        fc
+            .jsonValue({ maxDepth: 1 })
+            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
+        { nil: null },
+    ),
     event: fc.constantFrom("mail", "serverChange", "permission"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("notify"),
@@ -123,78 +141,111 @@ describe("msgpack round-trip", () => {
     const opts = { numRuns: 200 };
 
     it("baseMsg", () => {
-        fc.assert(fc.property(arbBaseMsg, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbBaseMsg, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("successMsg", () => {
-        fc.assert(fc.property(arbSuccessMsg, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbSuccessMsg, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("errMsg", () => {
-        fc.assert(fc.property(arbErrMsg, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbErrMsg, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("resourceMsg", () => {
-        fc.assert(fc.property(arbResourceMsg, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbResourceMsg, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("notifyMsg", () => {
-        fc.assert(fc.property(arbNotifyMsg, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbNotifyMsg, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("mailSQL (string fields)", () => {
-        fc.assert(fc.property(arbMailSQL, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbMailSQL, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("mailWS (binary fields)", () => {
-        fc.assert(fc.property(arbMailWS, (msg) => {
-            const decoded = msgpack.decode(msgpack.encode(msg));
-            // Uint8Array round-trips through msgpack as Buffer — compare contents
-            for (const key of Object.keys(msg) as (keyof typeof msg)[]) {
-                const orig = msg[key];
-                const dec = (decoded as Record<string, unknown>)[key];
-                if (orig instanceof Uint8Array) {
-                    expect(new Uint8Array(dec as ArrayBuffer)).toEqual(orig);
-                } else {
-                    expect(dec).toEqual(orig);
+        fc.assert(
+            fc.property(arbMailWS, (msg) => {
+                const decoded = msgpack.decode(msgpack.encode(msg));
+                // Uint8Array round-trips through msgpack as Buffer — compare contents
+                for (const key of Object.keys(msg) as (keyof typeof msg)[]) {
+                    const orig = msg[key];
+                    const dec = (decoded as Record<string, unknown>)[key];
+                    const actual =
+                        orig instanceof Uint8Array
+                            ? new Uint8Array(dec as ArrayBuffer)
+                            : dec;
+                    expect(actual).toEqual(orig);
                 }
-            }
-        }), opts);
+            }),
+            opts,
+        );
     });
 
     it("server", () => {
-        fc.assert(fc.property(arbServer, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbServer, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("channel", () => {
-        fc.assert(fc.property(arbChannel, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbChannel, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("permission", () => {
-        fc.assert(fc.property(arbPermission, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbPermission, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 
     it("device", () => {
-        fc.assert(fc.property(arbDevice, (msg) => {
-            expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
-        }), opts);
+        fc.assert(
+            fc.property(arbDevice, (msg) => {
+                expect(msgpack.decode(msgpack.encode(msg))).toEqual(msg);
+            }),
+            opts,
+        );
     });
 });

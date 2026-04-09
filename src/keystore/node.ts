@@ -18,17 +18,18 @@ export class NodeKeyStore implements KeyStore {
         this.dir = dir;
     }
 
-    async clear(username: string): Promise<void> {
+    clear(username: string): Promise<void> {
         try {
             fs.unlinkSync(this.filePath(username));
         } catch {
             // File may not exist
         }
+        return Promise.resolve();
     }
 
-    async load(username?: string): Promise<null | StoredCredentials> {
+    load(username?: string): Promise<null | StoredCredentials> {
         if (username) {
-            return this.readFile(this.filePath(username));
+            return Promise.resolve(this.readFile(this.filePath(username)));
         }
         // Find most recent .vex file in the directory
         try {
@@ -40,17 +41,20 @@ export class NodeKeyStore implements KeyStore {
                     name: f,
                 }))
                 .sort((a, b) => b.mtime - a.mtime);
-            if (files.length === 0) return null;
-            return this.readFile(path.join(this.dir, files[0].name));
+            if (files.length === 0) return Promise.resolve(null);
+            return Promise.resolve(
+                this.readFile(path.join(this.dir, files[0].name)),
+            );
         } catch {
-            return null;
+            return Promise.resolve(null);
         }
     }
 
-    async save(creds: StoredCredentials): Promise<void> {
+    save(creds: StoredCredentials): Promise<void> {
         const data = JSON.stringify(creds);
         const encrypted = XUtils.encryptKeyData("", data);
         fs.writeFileSync(this.filePath(creds.username), encrypted);
+        return Promise.resolve();
     }
 
     private filePath(username: string): string {
@@ -61,9 +65,25 @@ export class NodeKeyStore implements KeyStore {
         try {
             const data = fs.readFileSync(filePath);
             const decrypted = XUtils.decryptKeyData(new Uint8Array(data), "");
-            return JSON.parse(decrypted) as StoredCredentials;
+            const parsed: unknown = JSON.parse(decrypted);
+            if (isStoredCredentials(parsed)) {
+                return parsed;
+            }
+            return null;
         } catch {
             return null;
         }
     }
+}
+
+function isStoredCredentials(value: unknown): value is StoredCredentials {
+    if (typeof value !== "object" || value === null) return false;
+    return (
+        "username" in value &&
+        typeof value.username === "string" &&
+        "deviceID" in value &&
+        typeof value.deviceID === "string" &&
+        "deviceKey" in value &&
+        typeof value.deviceKey === "string"
+    );
 }
