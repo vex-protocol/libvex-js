@@ -1745,11 +1745,22 @@ export class Client {
     /* Retrieves the userID with the user identifier.
     user identifier is checked for userID, then signkey,
     and finally falls back to username. */
+    /** Negative cache for user lookups that returned 404. TTL = 30 minutes. */
+    private readonly notFoundUsers = new Map<string, number>();
+    private static readonly NOT_FOUND_TTL = 30 * 60 * 1000;
+
     private async fetchUser(
         userIdentifier: string,
     ): Promise<[null | User, AxiosError | null]> {
+        // Positive cache
         if (userIdentifier in this.userRecords) {
             return [this.userRecords[userIdentifier] ?? null, null];
+        }
+
+        // Negative cache — skip users we know don't exist (TTL-based)
+        const notFoundAt = this.notFoundUsers.get(userIdentifier);
+        if (notFoundAt && Date.now() - notFoundAt < Client.NOT_FOUND_TTL) {
+            return [null, null];
         }
 
         try {
@@ -1758,8 +1769,15 @@ export class Client {
             );
             const userRecord = decodeAxios(UserCodec, res.data);
             this.userRecords[userIdentifier] = userRecord;
+            this.notFoundUsers.delete(userIdentifier);
             return [userRecord, null];
         } catch (err: unknown) {
+            if (isAxiosError(err) && err.response?.status === 404) {
+                // Definitive: user doesn't exist — cache and don't retry
+                this.notFoundUsers.set(userIdentifier, Date.now());
+                return [null, err];
+            }
+            // Transient (5xx, network error) — don't cache, caller can retry
             return [null, isAxiosError(err) ? err : null];
         }
     }
@@ -2557,25 +2575,14 @@ export class Client {
                         };
                         await this.database.saveSession(newSession);
 
-                        let [user] = await this.fetchUser(newSession.userID);
+                        const [user] = await this.fetchUser(newSession.userID);
 
                         if (user) {
                             this.emitter.emit("session", newSession, user);
                         } else {
-                            let failed = 1;
-                            // retry a couple times
-                            while (!user) {
-                                [user] = await this.fetchUser(
-                                    newSession.userID,
-                                );
-                                failed++;
-                                if (failed > 3) {
-                                    this.log.warn(
-                                        "Couldn't retrieve user entry.",
-                                    );
-                                    break;
-                                }
-                            }
+                            this.log.warn(
+                                "Couldn't retrieve user " + newSession.userID,
+                            );
                         }
                     } else {
                         this.log.warn("Mail decryption failed.");
