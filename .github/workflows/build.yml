@@ -57,6 +57,11 @@ jobs:
             - name: Security audit
               run: npm audit --audit-level=high || true
 
+            - name: Socket security scan
+              run: npx @socketsecurity/cli@latest ci
+              env:
+                  SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_API_KEY }}
+
             - name: Check for changeset
               run: npx changeset status --since=origin/master
 
