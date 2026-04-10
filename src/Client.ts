@@ -980,12 +980,12 @@ export class Client {
         }
         // Lazily create Node Storage only on the Node path (no logger override).
         // When a logger is provided (browser/RN), the caller must supply storage
-        // via PlatformPreset.createStorage() — there is no Node fallback.
+        // via BootstrapConfig.createStorage() — there is no Node fallback.
         let resolvedStorage = storage;
         if (!resolvedStorage) {
             if (opts.logger) {
                 throw new Error(
-                    "No storage provided. When using a custom logger (browser/RN), pass storage from your PlatformPreset.",
+                    "No storage provided. When using a custom logger (browser/RN), pass storage from your BootstrapConfig.",
                 );
             }
             const { createNodeStorage } = await import("./storage/node.js");
