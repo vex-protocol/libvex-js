@@ -1059,6 +1059,16 @@ export class Client {
     /**
      * Manually closes the client. Emits the closed event on successful shutdown.
      */
+    /**
+     * Delete all local data — message history, encryption sessions, and prekeys.
+     * Closes the client afterward. Credentials (keychain) must be cleared by the consumer.
+     */
+    public async deleteAllData(): Promise<void> {
+        await this.database.purgeHistory();
+        await this.database.purgeKeyData();
+        await this.close(true);
+    }
+
     public async close(muteEvent = false): Promise<void> {
         this.manuallyClosing = true;
         this.log.info("Manually closing client.");

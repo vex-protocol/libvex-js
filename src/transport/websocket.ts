@@ -68,12 +68,12 @@ export class WebSocketAdapter implements WebSocketLike {
         if (event === "message") {
             const typedListener: (data: Uint8Array) => void = listener;
             const wrapped: EventListener = (ev: Event) => {
-                // Browser WebSocket wraps binary data in MessageEvent
-                if (
-                    ev instanceof MessageEvent &&
-                    ev.data instanceof ArrayBuffer
-                ) {
-                    typedListener(new Uint8Array(ev.data));
+                // Extract binary data from the message event.
+                // Browser/Node use MessageEvent with .data, React Native
+                // uses a plain object with .data (no MessageEvent global).
+                const data = (ev as { data?: unknown }).data;
+                if (data instanceof ArrayBuffer) {
+                    typedListener(new Uint8Array(data));
                 }
             };
             this.messageListeners.set(typedListener, wrapped);
