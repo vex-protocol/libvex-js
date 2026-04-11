@@ -18,26 +18,19 @@ env:
 jobs:
     # ── Parallel checks ────────────────────────────────────────────────────
     #
-    # `build` and `test` keep the ubuntu/macos/windows matrix because
-    # libvex ships a sqlite storage backend (better-sqlite3) that has
-    # caught real Windows-only issues in the past — native modules,
-    # path separator differences, ESM URL handling. The lint/format/
-    # types/library-quality/supply-chain jobs run on ubuntu only — they
-    # are deterministic across OSes.
+    # Every job except `e2e-prod` runs on ubuntu-latest only. The
+    # cross-OS coverage lives in `e2e-prod`, which exercises the full
+    # installed-dep path (native better-sqlite3 compilation, kysely's
+    # pathToFileURL migration provider, ESM URL handling on Windows)
+    # against the live production spire. Duplicating the matrix on
+    # `build` and `test` would just triple CI minutes for no additional
+    # signal — if something is broken on Windows, e2e-prod catches it.
 
     build:
-        name: Build (${{ matrix.os }})
-        runs-on: ${{ matrix.os }}
-        strategy:
-            fail-fast: false
-            matrix:
-                os:
-                    - ubuntu-latest
-                    - macos-latest
-                    - windows-latest
+        name: Build
+        runs-on: ubuntu-latest
         steps:
             - name: Harden Runner
-              if: runner.os == 'Linux'
               uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
               with:
                   egress-policy: audit
@@ -53,18 +46,10 @@ jobs:
               run: npm run build
 
     test:
-        name: Test (${{ matrix.os }})
-        runs-on: ${{ matrix.os }}
-        strategy:
-            fail-fast: false
-            matrix:
-                os:
-                    - ubuntu-latest
-                    - macos-latest
-                    - windows-latest
+        name: Test
+        runs-on: ubuntu-latest
         steps:
             - name: Harden Runner
-              if: runner.os == 'Linux'
               uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
               with:
                   egress-policy: audit
