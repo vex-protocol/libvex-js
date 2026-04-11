@@ -195,6 +195,42 @@ jobs:
             - name: Check for changeset
               run: npx changeset status --since=origin/master
 
+    # ── End-to-end against production ─────────────────────────────────────
+    #
+    # Runs the full e2e suite (node + browser projects) against the live
+    # production spire at api.vex.wtf. Gated on every other check passing
+    # so we don't waste prod cycles on PRs that already failed unit tests
+    # or lint. Same-repo only — fork PRs skip this so strangers can't
+    # spam prod from a CI button.
+
+    e2e-prod:
+        name: E2E (production)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        needs:
+            - build
+            - test
+            - lint
+            - types
+            - library-quality
+            - supply-chain
+            - changeset
+        runs-on: ubuntu-latest
+        steps:
+            - name: Harden Runner
+              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+              with:
+                  egress-policy: audit
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+              with:
+                  node-version-file: .tool-versions
+                  cache: npm
+            - run: npm ci
+            - name: Vitest e2e (node + browser) against api.vex.wtf
+              run: npm run test:e2e
+
     # ── Single aggregator — the only required status check ────────────────
 
     ci-ok:
@@ -208,6 +244,7 @@ jobs:
             - library-quality
             - supply-chain
             - changeset
+            - e2e-prod
         runs-on: ubuntu-latest
         steps:
             - name: Fail if any upstream job failed or was cancelled
