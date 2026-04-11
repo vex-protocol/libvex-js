@@ -1,6 +1,10 @@
 import type { Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
-import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "../../types/index.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+} from "../../types/index.js";
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 
 import {

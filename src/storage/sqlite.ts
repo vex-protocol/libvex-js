@@ -1,7 +1,11 @@
 import type { Message } from "../index.js";
 import type { Storage } from "../Storage.js";
 import type { Logger } from "../transport/types.js";
-import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "../types/index.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+} from "../types/index.js";
 import type {
     ClientDatabase,
     DeviceRow,
@@ -520,7 +524,14 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
                 })
-                .returning(["deviceID", "index", "keyID", "publicKey", "signature", "userID"])
+                .returning([
+                    "deviceID",
+                    "index",
+                    "keyID",
+                    "publicKey",
+                    "signature",
+                    "userID",
+                ])
                 .executeTakeFirstOrThrow();
 
             saved.push(row);

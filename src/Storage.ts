@@ -1,5 +1,9 @@
 import type { Message, Session } from "./index.js";
-import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey } from "./types/index.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+} from "./types/index.js";
 import type { Device, PreKeysSQL } from "@vex-chat/types";
 import type { EventEmitter } from "eventemitter3";
 /**
