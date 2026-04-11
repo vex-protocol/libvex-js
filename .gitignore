@@ -13,6 +13,9 @@ files
 avatars
 docs/
 
+# api-extractor scratch dir
+temp/
+
 # Wrong lockfiles / package managers
 yarn.lock
 pnpm-lock.yaml
