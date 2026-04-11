@@ -232,18 +232,15 @@ jobs:
               run: npm run test:e2e
 
     # ── Single aggregator — the only required status check ────────────────
+    #
+    # Only depends on e2e-prod because e2e-prod itself transitively
+    # depends on every other job. Keeps the dependency graph linear:
+    # everything → e2e-prod → ci-ok.
 
     ci-ok:
         name: CI OK
         if: always()
         needs:
-            - build
-            - test
-            - lint
-            - types
-            - library-quality
-            - supply-chain
-            - changeset
             - e2e-prod
         runs-on: ubuntu-latest
         steps:
