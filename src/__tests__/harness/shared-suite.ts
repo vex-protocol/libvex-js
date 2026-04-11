@@ -271,7 +271,7 @@ export function platformSuite(
         // TODO: multi-device fan-out requires sender to query fresh device
         // list before sending. Currently the sender caches one device and
         // the message only reaches device1.
-        test.skip("multi-device message sync", async () => {
+        test.todo("multi-device message sync", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
                 dbLogLevel: "error",

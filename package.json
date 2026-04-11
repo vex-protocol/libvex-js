@@ -69,6 +69,7 @@
     "devDependencies": {
         "@changesets/cli": "^2.30.0",
         "@types/better-sqlite3": "^7.6.13",
+        "@types/ed2curve": "0.2.4",
         "@types/node": "^24.12.2",
         "@types/uuid": "^8.3.0",
         "@vitest/eslint-plugin": "^1.6.14",

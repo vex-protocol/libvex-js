@@ -1,6 +1,11 @@
 import type { Storage } from "./Storage.js";
 import type { Logger, WebSocketLike } from "./transport/types.js";
-import type { PreKeysCrypto, SessionCrypto, UnsavedPreKey, XKeyRing } from "./types/index.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+    XKeyRing,
+} from "./types/index.js";
 import type { KeyPair } from "@vex-chat/crypto";
 import type {
     ActionToken,
@@ -573,6 +578,8 @@ export class Client {
      */
     public static encryptKeyData = XUtils.encryptKeyData;
 
+    private static readonly NOT_FOUND_TTL = 30 * 60 * 1000;
+
     /**
      * Channel operations.
      */
@@ -686,7 +693,6 @@ export class Client {
          */
         user: this.getUser.bind(this),
     };
-
     /**
      * Message operations (direct and group).
      *
@@ -727,6 +733,7 @@ export class Client {
          */
         send: this.sendMessage.bind(this),
     };
+
     /**
      * Server moderation helper methods.
      */
@@ -847,37 +854,43 @@ export class Client {
     private readonly emitter = new EventEmitter<ClientEvents>();
 
     private fetchingMail: boolean = false;
-
     private firstMailFetch = true;
+
     private readonly forwarded = new Set<string>();
 
     private readonly host: string;
-
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
     private readonly log: Logger;
+
     private readonly mailInterval?: NodeJS.Timeout;
 
     private manuallyClosing: boolean = false;
+    /* Retrieves the userID with the user identifier.
+    user identifier is checked for userID, then signkey,
+    and finally falls back to username. */
+    /** Negative cache for user lookups that returned 404. TTL = 30 minutes. */
+    private readonly notFoundUsers = new Map<string, number>();
 
     private readonly options?: ClientOptions | undefined;
-    private pingInterval: null | ReturnType<typeof setTimeout> = null;
 
+    private pingInterval: null | ReturnType<typeof setTimeout> = null;
     private readonly prefixes:
         | { HTTP: "http://"; WS: "ws://" }
         | { HTTP: "https://"; WS: "wss://" };
 
     private reading: boolean = false;
     private sessionRecords: Record<string, SessionCrypto> = {};
-
     // these are created from one set of sign keys
     private readonly signKeys: KeyPair;
+
     private socket: WebSocketLike;
     private token: null | string = null;
-
     private user?: User;
+
     private userRecords: Record<string, User> = {};
+
     private xKeyRing?: XKeyRing;
 
     private constructor(
@@ -934,6 +947,12 @@ export class Client {
         this.socket = new WebSocketAdapter("ws://localhost:1234");
         this.socket.onerror = () => {};
 
+        // Strip the `logger` field before stringifying — when a consumer
+        // passes a Winston logger instance (which has a circular
+        // `_readableState.pipes[0].parent` back-reference from the
+        // underlying file transport), JSON.stringify throws
+        // `TypeError: Converting circular structure to JSON`.
+        const { logger: _logger, ...safeOptions } = options ?? {};
         this.log.info(
             "Client debug information: " +
                 JSON.stringify(
@@ -943,7 +962,7 @@ export class Client {
                             platform: this.options?.deviceName ?? "unknown",
                         },
                         host: this.getHost(),
-                        options,
+                        options: safeOptions,
                         publicKey: this.getKeys().public,
                     },
                     null,
@@ -951,7 +970,6 @@ export class Client {
                 ),
         );
     }
-
     /**
      * Creates and initializes a client in one step.
      *
@@ -1016,6 +1034,7 @@ export class Client {
     public static generateSecretKey(): string {
         return XUtils.encodeHex(xSignKeyPair().secretKey);
     }
+
     /**
      * Generates a random username using bip39.
      *
@@ -1054,19 +1073,6 @@ export class Client {
 
     private static getMnemonic(session: SessionSQL): string {
         return xMnemonic(xKDF(XUtils.decodeHex(session.fingerprint)));
-    }
-
-    /**
-     * Manually closes the client. Emits the closed event on successful shutdown.
-     */
-    /**
-     * Delete all local data — message history, encryption sessions, and prekeys.
-     * Closes the client afterward. Credentials (keychain) must be cleared by the consumer.
-     */
-    public async deleteAllData(): Promise<void> {
-        await this.database.purgeHistory();
-        await this.database.purgeKeyData();
-        await this.close(true);
     }
 
     public async close(muteEvent = false): Promise<void> {
@@ -1126,6 +1132,19 @@ export class Client {
         // auth message before OTK generation blocks for ~5s on mobile.
         await new Promise((r) => setTimeout(r, 0));
         await this.negotiateOTK();
+    }
+
+    /**
+     * Manually closes the client. Emits the closed event on successful shutdown.
+     */
+    /**
+     * Delete all local data — message history, encryption sessions, and prekeys.
+     * Closes the client afterward. Credentials (keychain) must be cleared by the consumer.
+     */
+    public async deleteAllData(): Promise<void> {
+        await this.database.purgeHistory();
+        await this.database.purgeKeyData();
+        await this.close(true);
     }
 
     /**
@@ -1311,9 +1330,6 @@ export class Client {
                 ),
             );
             const preKeyIndex = this.xKeyRing.preKeys.index;
-            if (preKeyIndex == null) {
-                return [null, new Error("Pre-key index is missing.")];
-            }
             const regMsg: RegistrationPayload = {
                 deviceName: this.options?.deviceName ?? "unknown",
                 password,
@@ -1735,7 +1751,6 @@ export class Client {
     private async deleteServer(serverID: string): Promise<void> {
         await this.http.delete(this.getHost() + "/server/" + serverID);
     }
-
     /**
      * Gets a list of permissions for a server.
      *
@@ -1751,13 +1766,6 @@ export class Client {
         );
         return decodeAxios(PermissionArrayCodec, res.data);
     }
-
-    /* Retrieves the userID with the user identifier.
-    user identifier is checked for userID, then signkey,
-    and finally falls back to username. */
-    /** Negative cache for user lookups that returned 404. TTL = 30 minutes. */
-    private readonly notFoundUsers = new Map<string, number>();
-    private static readonly NOT_FOUND_TTL = 30 * 60 * 1000;
 
     private async fetchUser(
         userIdentifier: string,
@@ -2298,14 +2306,23 @@ export class Client {
         const identityKeys = this.idKeys;
 
         const existingPreKeys = await this.database.getPreKeys();
-        const preKeys: PreKeysCrypto = existingPreKeys ?? await (async () => {
-            this.log.warn("No prekeys found in database, creating a new one.");
-            const unsaved = this.createPreKey();
-            const [saved] = await this.database.savePreKeys([unsaved], false);
-            if (!saved || saved.index == null)
-                throw new Error("Failed to save prekey — no index returned.");
-            return { ...unsaved, index: saved.index };
-        })();
+        const preKeys: PreKeysCrypto =
+            existingPreKeys ??
+            (await (async () => {
+                this.log.warn(
+                    "No prekeys found in database, creating a new one.",
+                );
+                const unsaved = this.createPreKey();
+                const [saved] = await this.database.savePreKeys(
+                    [unsaved],
+                    false,
+                );
+                if (!saved || saved.index == null)
+                    throw new Error(
+                        "Failed to save prekey — no index returned.",
+                    );
+                return { ...unsaved, index: saved.index };
+            })());
 
         const sessions = await this.database.getAllSessions();
         for (const session of sessions) {
@@ -2755,9 +2772,6 @@ export class Client {
         );
 
         const devPreKeyIndex = this.xKeyRing.preKeys.index;
-        if (devPreKeyIndex == null) {
-            throw new Error("Pre-key index is missing.");
-        }
         const devMsg: DevicePayload = {
             deviceName: this.options?.deviceName ?? "unknown",
             preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
