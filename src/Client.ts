@@ -1,7 +1,41 @@
-// tslint:disable: no-empty-interface
+import type { Storage } from "./Storage.js";
+import type { Logger, WebSocketLike } from "./transport/types.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+    XKeyRing,
+} from "./types/index.js";
+import type { KeyPair } from "@vex-chat/crypto";
+import type {
+    ActionToken,
+    ChallMsg,
+    Channel,
+    Device,
+    DevicePayload,
+    Emoji,
+    FileResponse,
+    FileSQL,
+    Invite,
+    KeyBundle,
+    MailWS,
+    NotifyMsg,
+    Permission,
+    PreKeysSQL,
+    PreKeysWS,
+    ReceiptMsg,
+    RegistrationPayload,
+    ResourceMsg,
+    RespMsg,
+    Server,
+    SessionSQL,
+} from "@vex-chat/types";
+import type { ClientMessage } from "@vex-chat/types";
+import type { AxiosInstance } from "axios";
 
-import { sleep } from "@extrahash/sleep";
 import {
+    xBoxKeyPair,
+    xBoxKeyPairFromSecret,
     xConcat,
     xConstants,
     xDH,
@@ -11,109 +45,67 @@ import {
     XKeyConvert,
     xMakeNonce,
     xMnemonic,
+    xRandomBytes,
+    xSecretbox,
+    xSecretboxOpen,
+    xSign,
+    xSignKeyPair,
+    xSignKeyPairFromSecret,
     XUtils,
 } from "@vex-chat/crypto";
-import type {
-    IActionToken,
-    IChallMsg,
-    IChannel,
-    IDevice,
-    IDevicePayload,
-    IEmoji,
-    IFileResponse,
-    IFileSQL,
-    IInvite,
-    IKeyBundle,
-    IMailWS,
-    INotifyMsg,
-    IPermission,
-    IPreKeysCrypto,
-    IPreKeysSQL,
-    IPreKeysWS,
-    IReceiptMsg,
-    IRegistrationPayload,
-    IResourceMsg,
-    IRespMsg,
-    IServer,
-    ISessionCrypto,
-    ISessionSQL,
-    ISucessMsg,
-    IXKeyRing,
+import {
+    MailType,
+    MailWSSchema,
+    PermissionSchema,
+    WSMessageSchema,
 } from "@vex-chat/types";
-import { MailType } from "@vex-chat/types";
-import axios, { AxiosError } from "axios";
-import type { AxiosInstance } from "axios";
-import pc from "picocolors";
-import { EventEmitter } from "eventemitter3";
-import { Packr } from "msgpackr";
-// useRecords:false emits standard msgpack (no nonstandard record extension).
-// moreTypes:false keeps the extension set to what every other decoder understands.
-const _packr = new Packr({ useRecords: false, moreTypes: false });
-// Packr.encode() returns a subarray of its internal pool buffer.
-// In browsers, XMLHttpRequest.send() sends the full underlying ArrayBuffer,
-// not just the slice — corrupting the payload (axios issue #4068).
-// Wrap encode to always return a fresh copy.
-const msgpack = {
-    encode: (value: any): Uint8Array => {
-        const packed = _packr.encode(value);
-        return new Uint8Array(
-            packed.buffer.slice(
-                packed.byteOffset,
-                packed.byteOffset + packed.byteLength,
-            ),
-        );
-    },
-    decode: _packr.decode.bind(_packr),
-};
-import objectHash from "object-hash";
-import nacl from "tweetnacl";
-import * as uuid from "uuid";
-import type {
-    IClientAdapters,
-    ILogger,
-    IWebSocketLike,
-} from "./transport/types.js";
-import type { IStorage } from "./IStorage.js";
-import { capitalize } from "./utils/capitalize.js";
 
+import axios, { type AxiosError, isAxiosError } from "axios";
+import { EventEmitter } from "eventemitter3";
+import * as uuid from "uuid";
+import { z } from "zod/v4";
+
+import { WebSocketAdapter } from "./transport/websocket.js";
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+import { msgpack } from "./codec.js";
+import {
+    ActionTokenCodec,
+    AuthResponseCodec,
+    ChannelArrayCodec,
+    ChannelCodec,
+    ConnectResponseCodec,
+    decodeAxios,
+    DeviceArrayCodec,
+    DeviceChallengeCodec,
+    DeviceCodec,
+    EmojiArrayCodec,
+    EmojiCodec,
+    FileSQLCodec,
+    InviteArrayCodec,
+    InviteCodec,
+    KeyBundleCodec,
+    OtkCountCodec,
+    PermissionArrayCodec,
+    PermissionCodec,
+    ServerArrayCodec,
+    ServerCodec,
+    UserArrayCodec,
+    UserCodec,
+    WhoamiCodec,
+} from "./codecs.js";
+import { capitalize } from "./utils/capitalize.js";
 import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
 import { uuidToUint8 } from "./utils/uint8uuid.js";
 
-const protocolMsgRegex = /��\w+:\w+��/g;
+const _protocolMsgRegex = /��\w+:\w+��/g;
 
 /**
- * IMessage is a chat message.
- */
-export interface IMessage {
-    /** Hex-encoded nonce used for message encryption. */
-    nonce: string;
-    /** Globally unique message identifier. */
-    mailID: string;
-    /** Sender device ID. */
-    sender: string;
-    /** Recipient device ID. */
-    recipient: string;
-    /** Plaintext message content (or empty string when decryption failed). */
-    message: string;
-    /** Whether this message was received or sent by the current client. */
-    direction: "incoming" | "outgoing";
-    /** Time the message was created/received. */
-    timestamp: Date;
-    /** Whether payload decryption succeeded. */
-    decrypted: boolean;
-    /** Channel ID for group messages; `null` for direct messages. */
-    group: string | null;
-    /** `true` when this message was forwarded to another owned device. */
-    forward: boolean;
-    /** User ID of the original author. */
-    authorID: string;
-    /** User ID of the intended reader. */
-    readerID: string;
-}
-
-/**
- * IPermission is a permission to a resource.
+ * Permission is a permission to a resource.
  *
  * Common fields:
  * - `permissionID`: unique permission row ID
@@ -122,17 +114,22 @@ export interface IMessage {
  * - `resourceType`: type string for the resource
  * - `powerLevel`: authorization level
  */
-export type { IPermission } from "@vex-chat/types";
+export type { Permission } from "@vex-chat/types";
 
 /**
- * IKeys are a pair of ed25519 public and private keys,
- * encoded as hex strings.
+ * @ignore
  */
-export interface IKeys {
-    /** Public Ed25519 key as hex. */
-    public: string;
-    /** Secret Ed25519 key as hex. Store securely. */
-    private: string;
+export interface Channels {
+    /** Creates a channel in a server. */
+    create: (name: string, serverID: string) => Promise<Channel>;
+    /** Deletes a channel. */
+    delete: (channelID: string) => Promise<void>;
+    /** Lists channels in a server. */
+    retrieve: (serverID: string) => Promise<Channel[]>;
+    /** Gets one channel by ID. */
+    retrieveByID: (channelID: string) => Promise<Channel | null>;
+    /** Lists users currently visible in a channel. */
+    userList: (channelID: string) => Promise<User[]>;
 }
 
 /**
@@ -146,27 +143,285 @@ export interface IKeys {
  * - `lastLogin`: last login timestamp string
  * - `deleted`: soft-delete flag
  */
-export type { IDevice } from "@vex-chat/types";
+export type { Device } from "@vex-chat/types";
 
 /**
- * IUser is a single user on the vex platform.
- *
- * This is intentionally a censored user shape for client use, containing:
- * - `userID`
- * - `username`
- * - `lastSeen`
+ * ClientOptions are the options you can pass into the client.
  */
-export interface IUser {
-    /** Last-seen timestamp (unix epoch milliseconds). */
-    lastSeen: number;
-    /** User identifier. */
-    userID: string;
-    /** Public username. */
-    username: string;
+export interface ClientOptions {
+    /** Folder path where the sqlite file is created. */
+    dbFolder?: string;
+    /** Logging level for storage/database logs. */
+    dbLogLevel?:
+        | "debug"
+        | "error"
+        | "http"
+        | "info"
+        | "silly"
+        | "verbose"
+        | "warn";
+    /** Platform label for device registration (e.g. "ios", "macos", "linux"). */
+    deviceName?: string;
+    /** API host without protocol. Defaults to `api.vex.wtf`. */
+    host?: string;
+    /** Use sqlite in-memory mode (`:memory:`) instead of a file. */
+    inMemoryDb?: boolean;
+    /** Logger implementation. When omitted, defaults to winston (Node.js). */
+    logger?: Logger;
+    /** Logging level for client runtime logs. */
+    logLevel?:
+        | "debug"
+        | "error"
+        | "http"
+        | "info"
+        | "silly"
+        | "verbose"
+        | "warn";
+    /** Whether local message history should be persisted by default storage. */
+    saveHistory?: boolean;
+    /** Use `http/ws` instead of `https/wss`. Intended for local/dev environments. */
+    unsafeHttp?: boolean;
 }
 
 /**
- * ISession is an end to end encryption session with another peer.
+ * @ignore
+ */
+export interface Devices {
+    /** Deletes one of the account's devices (except the currently active one). */
+    delete: (deviceID: string) => Promise<void>;
+    /** Registers the current key material as a new device. */
+    register: () => Promise<Device | null>;
+    /** Fetches one device by ID. */
+    retrieve: (deviceIdentifier: string) => Promise<Device | null>;
+}
+
+/**
+ * Channel is a chat channel on a server.
+ *
+ * Common fields:
+ * - `channelID`
+ * - `serverID`
+ * - `name`
+ */
+export type { Channel } from "@vex-chat/types";
+
+/**
+ * Server is a single chat server.
+ *
+ * Common fields:
+ * - `serverID`
+ * - `name`
+ * - `icon` (optional URL/data)
+ */
+export type { Server } from "@vex-chat/types";
+
+/**
+ * @ignore
+ */
+export interface Emojis {
+    /** Uploads a custom emoji to a server. */
+    create: (
+        emoji: Uint8Array,
+        name: string,
+        serverID: string,
+    ) => Promise<Emoji | null>;
+    /** Fetches one emoji's metadata by ID. */
+    retrieve: (emojiID: string) => Promise<Emoji | null>;
+    /** Lists emojis available on a server. */
+    retrieveList: (serverID: string) => Promise<Emoji[]>;
+}
+
+/**
+ * Progress payload emitted by the `fileProgress` event.
+ */
+export interface FileProgress {
+    /** Whether this progress event is for upload or download. */
+    direction: "download" | "upload";
+    /** Bytes transferred so far. */
+    loaded: number;
+    /** Integer percentage from `0` to `100`. */
+    progress: number;
+    /** Correlation token (file ID, nonce, or label depending on operation). */
+    token: string;
+    /** Total expected bytes when available, otherwise `0`. */
+    total: number;
+}
+
+/**
+ * FileRes is a server response to a file retrieval request.
+ *
+ * Structure:
+ * - `details`: metadata (`VexFile`)
+ * - `data`: decrypted binary bytes
+ *
+ * @example
+ * ```ts
+ * const response: FileRes = {
+ *     details: {
+ *         fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
+ *         owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
+ *         nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
+ *     },
+ *     data: Buffer.from("hello"),
+ * };
+ * ```
+ */
+export type FileRes = FileResponse;
+
+/**
+ * @ignore
+ */
+export interface Files {
+    /** Uploads and encrypts a file. */
+    create: (file: Uint8Array) => Promise<[FileSQL, string]>;
+    /** Downloads and decrypts a file using a file ID and key. */
+    retrieve: (fileID: string, key: string) => Promise<FileResponse | null>;
+}
+
+/**
+ * @ignore
+ */
+export interface Invites {
+    /** Creates an invite for a server and duration. */
+    create: (serverID: string, duration: string) => Promise<Invite>;
+    /** Redeems an invite and returns the created permission grant. */
+    redeem: (inviteID: string) => Promise<Permission>;
+    /** Lists active invites for a server. */
+    retrieve: (serverID: string) => Promise<Invite[]>;
+}
+
+/**
+ * Keys are a pair of ed25519 public and private keys,
+ * encoded as hex strings.
+ */
+export interface Keys {
+    /** Secret Ed25519 key as hex. Store securely. */
+    private: string;
+    /** Public Ed25519 key as hex. */
+    public: string;
+}
+
+/**
+ * @ignore
+ */
+export interface Me {
+    /** Returns metadata for the currently authenticated device. */
+    device: () => Device;
+    /** Uploads and sets a new avatar image for the current user. */
+    setAvatar: (avatar: Uint8Array) => Promise<void>;
+    /** Returns the currently authenticated user profile. */
+    user: () => User;
+}
+
+/**
+ * Message is a chat message.
+ */
+export interface Message {
+    /** User ID of the original author. */
+    authorID: string;
+    /** Whether payload decryption succeeded. */
+    decrypted: boolean;
+    /** Whether this message was received or sent by the current client. */
+    direction: "incoming" | "outgoing";
+    /** `true` when this message was forwarded to another owned device. */
+    forward: boolean;
+    /** Channel ID for group messages; `null` for direct messages. */
+    group: null | string;
+    /** Globally unique message identifier. */
+    mailID: string;
+    /** Plaintext message content (or empty string when decryption failed). */
+    message: string;
+    /** Hex-encoded nonce used for message encryption. */
+    nonce: string;
+    /** User ID of the intended reader. */
+    readerID: string;
+    /** Recipient device ID. */
+    recipient: string;
+    /** Sender device ID. */
+    sender: string;
+    /** Time the message was created/received. */
+    timestamp: string;
+}
+
+/** Zod schema matching the {@link Message} interface for forwarded-message decode. */
+const messageSchema: z.ZodType<Message> = z.object({
+    authorID: z.string(),
+    decrypted: z.boolean(),
+    direction: z.enum(["incoming", "outgoing"]),
+    forward: z.boolean(),
+    group: z.string().nullable(),
+    mailID: z.string(),
+    message: z.string(),
+    nonce: z.string(),
+    readerID: z.string(),
+    recipient: z.string(),
+    sender: z.string(),
+    timestamp: z.string(),
+});
+
+/** Zod schema for a single inbox entry from getMail: [header, mailBody, timestamp]. */
+const mailInboxEntry = z.tuple([
+    z.custom<Uint8Array>((val) => val instanceof Uint8Array),
+    MailWSSchema,
+    z.string(),
+]);
+
+/**
+ * @ignore
+ */
+export interface Messages {
+    /** Deletes local history for a user/channel. */
+    delete: (userOrChannelID: string) => Promise<void>;
+    /** Sends an encrypted message to all members of a channel. */
+    group: (channelID: string, message: string) => Promise<void>;
+    /** Deletes all locally stored message history. */
+    purge: () => Promise<void>;
+    /** Returns local direct-message history with one user. */
+    retrieve: (userID: string) => Promise<Message[]>;
+    /** Returns local group-message history for one channel. */
+    retrieveGroup: (channelID: string) => Promise<Message[]>;
+    /** Sends an encrypted direct message to one user. */
+    send: (userID: string, message: string) => Promise<void>;
+}
+
+/**
+ * @ignore
+ */
+export interface Moderation {
+    /** Returns all permission entries for a server. */
+    fetchPermissionList: (serverID: string) => Promise<Permission[]>;
+    /** Removes a user from a server by revoking their server permission(s). */
+    kick: (userID: string, serverID: string) => Promise<void>;
+}
+
+/**
+ * @ignore
+ */
+export interface Permissions {
+    /** Deletes one permission grant. */
+    delete: (permissionID: string) => Promise<void>;
+    /** Lists permissions granted to the authenticated user. */
+    retrieve: () => Promise<Permission[]>;
+}
+
+/**
+ * @ignore
+ */
+export interface Servers {
+    /** Creates a server. */
+    create: (name: string) => Promise<Server>;
+    /** Deletes a server. */
+    delete: (serverID: string) => Promise<void>;
+    /** Leaves a server by removing the user's permission entry. */
+    leave: (serverID: string) => Promise<void>;
+    /** Lists servers available to the authenticated user. */
+    retrieve: () => Promise<Server[]>;
+    /** Gets one server by ID. */
+    retrieveByID: (serverID: string) => Promise<null | Server>;
+}
+
+/**
+ * Session is an end to end encryption session with another peer.
  *
  * Key fields include:
  * - `sessionID`
@@ -179,7 +434,7 @@ export interface IUser {
  *
  * @example
  * ```ts
- * const session: ISession = {
+ * const session: Session = {
  *     sessionID: "f6e4fbd0-7222-4ba8-b799-c227faf5c8de",
  *     userID: "f34f5e37-616f-4d3a-a437-e7c27c31cb73",
  *     deviceID: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
@@ -192,30 +447,51 @@ export interface IUser {
  * };
  * ```
  */
-export interface ISession extends ISessionSQL {}
+export type Session = SessionSQL;
 
 /**
- * IChannel is a chat channel on a server.
- *
- * Common fields:
- * - `channelID`
- * - `serverID`
- * - `name`
+ * @ignore
  */
-export type { IChannel } from "@vex-chat/types";
+export interface Sessions {
+    /** Marks one session as verification-confirmed. */
+    markVerified: (fingerprint: string) => Promise<void>;
+    /** Returns all locally known sessions. */
+    retrieve: () => Promise<SessionSQL[]>;
+    /** Builds a human-readable verification phrase from a session fingerprint. */
+    verify: (session: SessionSQL) => string;
+}
 
 /**
- * IServer is a single chat server.
+ * User is a single user on the vex platform.
  *
- * Common fields:
- * - `serverID`
- * - `name`
- * - `icon` (optional URL/data)
+ * This is intentionally a censored user shape for client use, containing:
+ * - `userID`
+ * - `username`
+ * - `lastSeen`
  */
-export type { IServer } from "@vex-chat/types";
+export interface User {
+    /** Last-seen timestamp (ISO 8601 string). */
+    lastSeen: string;
+    /** User identifier. */
+    userID: string;
+    /** Public username. */
+    username: string;
+}
 
 /**
- * IFile is an uploaded encrypted file.
+ * @ignore
+ */
+export interface Users {
+    /** Returns users with whom the current device has active sessions. */
+    familiars: () => Promise<User[]>;
+    /**
+     * Looks up a user by user ID, username, or signing key.
+     */
+    retrieve: (userID: string) => Promise<[null | User, AxiosError | null]>;
+}
+
+/**
+ * VexFile is an uploaded encrypted file.
  *
  * Common fields:
  * - `fileID`: file identifier
@@ -224,393 +500,14 @@ export type { IServer } from "@vex-chat/types";
  *
  * @example
  * ```ts
- * const file: IFile = {
+ * const file: VexFile = {
  *     fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
  *     owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
  *     nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
  * };
  * ```
  */
-export interface IFile extends IFileSQL {}
-
-/**
- * IFileRes is a server response to a file retrieval request.
- *
- * Structure:
- * - `details`: metadata (`IFile`)
- * - `data`: decrypted binary bytes
- *
- * @example
- * ```ts
- * const response: IFileRes = {
- *     details: {
- *         fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
- *         owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
- *         nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
- *     },
- *     data: Buffer.from("hello"),
- * };
- * ```
- */
-export interface IFileRes extends IFileResponse {}
-
-/**
- * @ignore
- */
-export interface IMe {
-    /** Returns the currently authenticated user profile. */
-    user: () => IUser;
-    /** Returns metadata for the currently authenticated device. */
-    device: () => IDevice;
-    /** Uploads and sets a new avatar image for the current user. */
-    setAvatar: (avatar: Uint8Array) => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IUsers {
-    /**
-     * Looks up a user by user ID, username, or signing key.
-     */
-    retrieve: (userID: string) => Promise<[IUser | null, AxiosError | null]>;
-    /** Returns users with whom the current device has active sessions. */
-    familiars: () => Promise<IUser[]>;
-}
-
-/**
- * @ignore
- */
-export interface IMessages {
-    /** Sends an encrypted direct message to one user. */
-    send: (userID: string, message: string) => Promise<void>;
-    /** Sends an encrypted message to all members of a channel. */
-    group: (channelID: string, message: string) => Promise<void>;
-    /** Returns local direct-message history with one user. */
-    retrieve: (userID: string) => Promise<IMessage[]>;
-    /** Returns local group-message history for one channel. */
-    retrieveGroup: (channelID: string) => Promise<IMessage[]>;
-    /** Deletes local history for a user/channel, optionally older than a duration. */
-    delete: (userOrChannelID: string, duration?: string) => Promise<void>;
-    /** Deletes all locally stored message history. */
-    purge: () => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IServers {
-    /** Lists servers available to the authenticated user. */
-    retrieve: () => Promise<IServer[]>;
-    /** Gets one server by ID. */
-    retrieveByID: (serverID: string) => Promise<IServer | null>;
-    /** Creates a server. */
-    create: (name: string) => Promise<IServer>;
-    /** Deletes a server. */
-    delete: (serverID: string) => Promise<void>;
-    /** Leaves a server by removing the user's permission entry. */
-    leave: (serverID: string) => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IModeration {
-    /** Removes a user from a server by revoking their server permission(s). */
-    kick: (userID: string, serverID: string) => Promise<void>;
-    /** Returns all permission entries for a server. */
-    fetchPermissionList: (serverID: string) => Promise<IPermission[]>;
-}
-
-/**
- * @ignore
- */
-export interface IPermissions {
-    /** Lists permissions granted to the authenticated user. */
-    retrieve: () => Promise<IPermission[]>;
-    /** Deletes one permission grant. */
-    delete: (permissionID: string) => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IInvites {
-    /** Redeems an invite and returns the created permission grant. */
-    redeem: (inviteID: string) => Promise<IPermission>;
-    /** Creates an invite for a server and duration. */
-    create: (serverID: string, duration: string) => Promise<IInvite>;
-    /** Lists active invites for a server. */
-    retrieve: (serverID: string) => Promise<IInvite[]>;
-}
-
-/**
- * @ignore
- */
-export interface IChannels {
-    /** Lists channels in a server. */
-    retrieve: (serverID: string) => Promise<IChannel[]>;
-    /** Gets one channel by ID. */
-    retrieveByID: (channelID: string) => Promise<IChannel | null>;
-    /** Creates a channel in a server. */
-    create: (name: string, serverID: string) => Promise<IChannel>;
-    /** Deletes a channel. */
-    delete: (channelID: string) => Promise<void>;
-    /** Lists users currently visible in a channel. */
-    userList: (channelID: string) => Promise<IUser[]>;
-}
-
-/**
- * @ignore
- */
-export interface ISessions {
-    /** Returns all locally known sessions. */
-    retrieve: () => Promise<ISessionSQL[]>;
-    /** Builds a human-readable verification phrase from a session fingerprint. */
-    verify: (session: ISessionSQL) => string;
-    /** Marks one session as verification-confirmed. */
-    markVerified: (fingerprint: string) => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IDevices {
-    /** Fetches one device by ID. */
-    retrieve: (deviceIdentifier: string) => Promise<IDevice | null>;
-    /** Registers the current key material as a new device. */
-    register: () => Promise<IDevice | null>;
-    /** Deletes one of the account's devices (except the currently active one). */
-    delete: (deviceID: string) => Promise<void>;
-}
-
-/**
- * @ignore
- */
-export interface IFiles {
-    /** Uploads and encrypts a file. */
-    create: (file: Uint8Array) => Promise<[IFileSQL, string]>;
-    /** Downloads and decrypts a file using a file ID and key. */
-    retrieve: (fileID: string, key: string) => Promise<IFileResponse | null>;
-}
-
-/**
- * @ignore
- */
-export interface IEmojis {
-    /** Uploads a custom emoji to a server. */
-    create: (
-        emoji: Uint8Array,
-        name: string,
-        serverID: string,
-    ) => Promise<IEmoji | null>;
-    /** Lists emojis available on a server. */
-    retrieveList: (serverID: string) => Promise<IEmoji[]>;
-    /** Fetches one emoji's metadata by ID. */
-    retrieve: (emojiID: string) => Promise<IEmoji | null>;
-}
-
-/**
- * Progress payload emitted by the `fileProgress` event.
- */
-export interface IFileProgress {
-    /** Correlation token (file ID, nonce, or label depending on operation). */
-    token: string;
-    /** Whether this progress event is for upload or download. */
-    direction: "upload" | "download";
-    /** Integer percentage from `0` to `100`. */
-    progress: number;
-    /** Bytes transferred so far. */
-    loaded: number;
-    /** Total expected bytes when available, otherwise `0`. */
-    total: number;
-}
-
-/**
- * IClientOptions are the options you can pass into the client.
- */
-export interface IClientOptions {
-    /** Logging level for client runtime logs. */
-    logLevel?:
-        | "error"
-        | "warn"
-        | "info"
-        | "http"
-        | "verbose"
-        | "debug"
-        | "silly";
-    /** API host without protocol. Defaults to `api.vex.wtf`. */
-    host?: string;
-    /** Folder path where the sqlite file is created. */
-    dbFolder?: string;
-    /** Use sqlite in-memory mode (`:memory:`) instead of a file. */
-    inMemoryDb?: boolean;
-    /** Logging level for storage/database logs. */
-    dbLogLevel?:
-        | "error"
-        | "warn"
-        | "info"
-        | "http"
-        | "verbose"
-        | "debug"
-        | "silly";
-    /** Use `http/ws` instead of `https/wss`. Intended for local/dev environments. */
-    unsafeHttp?: boolean;
-    /** Whether local message history should be persisted by default storage. */
-    saveHistory?: boolean;
-    /** Platform-specific adapters (WebSocket + Logger). When omitted, defaults to Node.js ws. */
-    adapters?: IClientAdapters;
-    /** Platform label for device registration (e.g. "ios", "macos", "linux"). */
-    deviceName?: string;
-}
-
-// tslint:disable-next-line: interface-name
-export declare interface Client {
-    /**
-     * This is emitted for file progress events.
-     *
-     * Example:
-     *
-     * ```ts
-     *   client.on("ready", () => {
-     *       await client.register()
-     *   });
-     * ```
-     *
-     * @event
-     */
-    on(
-        event: "fileProgress",
-        callback: (progress: IFileProgress) => void,
-    ): this;
-
-    /**
-     * This is emitted whenever the keyring is done initializing after an init()
-     * call. You must wait to login or register until after this event.
-     *
-     * Example:
-     *
-     * ```ts
-     *   client.on("ready", () => {
-     *       await client.register()
-     *   });
-     * ```
-     *
-     * @event
-     */
-    on(event: "ready", callback: () => void): this;
-
-    /**
-     * Emitted before the first inbox fetch/decrypt cycle after connect.
-     *
-     * Use this to show temporary loading UI while historical messages are
-     * decrypted from server payloads.
-     *
-     * @event
-     */
-    // tslint:disable-next-line: unified-signatures
-    on(event: "decryptingMail", callback: () => void): this;
-
-    /**
-     * This is emitted when you are connected to the chat.
-     *
-     * Example:
-     *
-     * ```ts
-     *   client.on("connected", (user) => {
-     *       // do something
-     *   });
-     * ```
-     *
-     * @event
-     */
-    // tslint:disable-next-line: unified-signatures
-    on(event: "connected", callback: () => void): this;
-
-    /**
-     * This is emitted for every sent and received message.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("message", (msg: IMessage) => {
-     *       console.log(message);
-     *   });
-     * ```
-     * @event
-     */
-    on(event: "message", callback: (message: IMessage) => void): this;
-
-    /**
-     * This is emitted when the user is granted a new permission.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("permission", (perm: IPermission) => {
-     *       console.log(perm);
-     *   });
-     * ```
-     * @event
-     */
-    on(event: "permission", callback: (permission: IPermission) => void): this;
-
-    /**
-     * This is emitted for a new encryption session being created with
-     * a specific user.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("session", (session: ISession, user: IUser) => {
-     *       console.log(session);
-     *       console.log(user);
-     *   });
-     * ```
-     * @event
-     */
-    on(
-        event: "session",
-        callback: (session: ISession, user: IUser) => void,
-    ): this;
-
-    /**
-     * This is emitted whenever the connection is closed. You must discard the client
-     * and connect again with a fresh one.
-     *
-     * Example:
-     * ```ts
-     *
-     *   client.on("disconnect", () => {
-     *     // do something
-     *   });
-     * ```
-     * @event
-     */
-    // tslint:disable-next-line: unified-signatures
-    on(event: "disconnect", callback: () => void): this;
-
-    /**
-     * This is emitted whenever the close() event is called and completed successfully.
-     * Note this is not fired for an unintentional disconnect, see the disconnect event.
-     *
-     * Example:
-     *
-     * ```ts
-     *
-     *   client.on("closed", () => {
-     *       process.exit(0);
-     *   });
-     * ```
-     *
-     * @event
-     */
-    // tslint:disable-next-line: unified-signatures
-    on(event: "closed", callback: () => void): this;
-}
+export type VexFile = FileSQL;
 
 /**
  * Client provides an interface for you to use a vex chat server and
@@ -624,16 +521,11 @@ export declare interface Client {
  *     // generate a secret key to use, save this somewhere permanent
  *     const privateKey = Client.generateSecretKey();
  *
- *     const client = new Client(privateKey);
+ *     const client = await Client.create(privateKey);
  *
- *     // the ready event is emitted when init() is finished.
- *     // you must wait until this event fires to perform
- *     // registration or login.
- *     client.on("ready", async () => {
- *         // you must register once before you can log in
- *         await client.register(Client.randomUsername());
- *         await client.login();
- *     })
+ *     // you must register once before you can log in
+ *     await client.register(Client.randomUsername());
+ *     await client.login();
  *
  *     // The authed event fires when login() successfully completes
  *     // and the server indicates you are authorized. You must wait to
@@ -650,23 +542,28 @@ export declare interface Client {
  *     client.on("message", (message) => {
  *         console.log("message:", message);
  *     })
- *
- *     // you must call init() to initialize the keyring and
- *     // start the client.
- *     client.init();
  * }
  *
  * main();
  * ```
  */
-export class Client extends EventEmitter {
-    /**
-     * Encrypts a secret key with a password.
-     *
-     * Pass-through utility from `@vex-chat/crypto`.
-     */
-    public static encryptKeyData = XUtils.encryptKeyData;
 
+/**
+ * Event signatures emitted by {@link Client}.
+ */
+interface ClientEvents {
+    closed: () => void;
+    connected: () => void;
+    decryptingMail: () => void;
+    disconnect: () => void;
+    fileProgress: (progress: FileProgress) => void;
+    message: (message: Message) => void;
+    permission: (permission: Permission) => void;
+    ready: () => void;
+    session: (session: Session, user: User) => void;
+}
+
+export class Client {
     /**
      * Decrypts a secret key from encrypted data produced by encryptKeyData().
      *
@@ -675,11 +572,410 @@ export class Client extends EventEmitter {
     public static decryptKeyData = XUtils.decryptKeyData;
 
     /**
+     * Encrypts a secret key with a password.
+     *
+     * Pass-through utility from `@vex-chat/crypto`.
+     */
+    public static encryptKeyData = XUtils.encryptKeyData;
+
+    private static readonly NOT_FOUND_TTL = 30 * 60 * 1000;
+
+    /**
+     * Channel operations.
+     */
+    public channels: Channels = {
+        /**
+         * Creates a new channel in a server.
+         * @param name: The channel name.
+         * @param serverID: The unique serverID to create the channel in.
+         *
+         * @returns - The created Channel object.
+         */
+        create: this.createChannel.bind(this),
+        /**
+         * Deletes a channel.
+         * @param channelID: The unique channelID to delete.
+         */
+        delete: this.deleteChannel.bind(this),
+        /**
+         * Retrieves all channels in a server.
+         *
+         * @returns - The list of Channel objects.
+         */
+        retrieve: this.getChannelList.bind(this),
+        /**
+         * Retrieves channel details by its unique channelID.
+         *
+         * @returns - The list of Channel objects.
+         */
+        retrieveByID: this.getChannelByID.bind(this),
+        /**
+         * Retrieves a channel's userlist.
+         * @param channelID: The channelID to retrieve userlist for.
+         */
+        userList: this.getUserList.bind(this),
+    };
+
+    /**
+     * Device management methods.
+     */
+    public devices: Devices = {
+        delete: this.deleteDevice.bind(this),
+        register: this.registerDevice.bind(this),
+        retrieve: this.getDeviceByID.bind(this),
+    };
+
+    /**
+     * Emoji operations.
+     *
+     * @example
+     * ```ts
+     * const emoji = await client.emoji.create(imageBuffer, "party", serverID);
+     * const list = await client.emoji.retrieveList(serverID);
+     * ```
+     */
+    public emoji: Emojis = {
+        create: this.uploadEmoji.bind(this),
+        retrieve: this.retrieveEmojiByID.bind(this),
+        retrieveList: this.retrieveEmojiList.bind(this),
+    };
+
+    /** File upload/download methods. */
+    public files: Files = {
+        /**
+         * Uploads an encrypted file and returns the details and the secret key.
+         * @param file: The file as a Buffer.
+         *
+         * @returns Details of the file uploaded and the key to encrypt in the form [details, key].
+         */
+        create: this.createFile.bind(this),
+        retrieve: this.retrieveFile.bind(this),
+    };
+
+    /**
+     * This is true if the client has ever been initialized. You can only initialize
+     * a client once.
+     */
+    public hasInit: boolean = false;
+
+    /**
+     * This is true if the client has ever logged in before. You can only login a client once.
+     */
+    public hasLoggedIn: boolean = false;
+
+    /**
+     * Invite-management methods.
+     */
+    public invites: Invites = {
+        create: this.createInvite.bind(this),
+        redeem: this.redeemInvite.bind(this),
+        retrieve: this.retrieveInvites.bind(this),
+    };
+
+    /**
+     * Helpers for information/actions related to the currently authenticated account.
+     */
+    public me: Me = {
+        /**
+         * Retrieves current device details
+         *
+         * @returns - The logged in device's Device object.
+         */
+        device: this.getDevice.bind(this),
+        /**
+         * Changes your avatar.
+         */
+        setAvatar: this.uploadAvatar.bind(this),
+        /**
+         * Retrieves your user information
+         *
+         * @returns - The logged in user's User object.
+         */
+        user: this.getUser.bind(this),
+    };
+    /**
+     * Message operations (direct and group).
+     *
+     * @example
+     * ```ts
+     * await client.messages.send(userID, "Hello!");
+     * await client.messages.group(channelID, "Hello channel!");
+     * const dmHistory = await client.messages.retrieve(userID);
+     * ```
+     */
+    public messages: Messages = {
+        delete: this.deleteHistory.bind(this),
+        /**
+         * Send a group message to a channel.
+         * @param channelID: The channelID of the channel to send a message to.
+         * @param message: The message to send.
+         */
+        group: this.sendGroupMessage.bind(this),
+        purge: this.purgeHistory.bind(this),
+        /**
+         * Gets the message history with a specific userID.
+         * @param userID: The userID of the user to retrieve message history for.
+         *
+         * @returns - The list of Message objects.
+         */
+        retrieve: this.getMessageHistory.bind(this),
+        /**
+         * Gets the group message history with a specific channelID.
+         * @param chqnnelID: The channelID of the channel to retrieve message history for.
+         *
+         * @returns - The list of Message objects.
+         */
+        retrieveGroup: this.getGroupHistory.bind(this),
+        /**
+         * Send a direct message.
+         * @param userID: The userID of the user to send a message to.
+         * @param message: The message to send.
+         */
+        send: this.sendMessage.bind(this),
+    };
+
+    /**
+     * Server moderation helper methods.
+     */
+    public moderation: Moderation = {
+        fetchPermissionList: this.fetchPermissionList.bind(this),
+        kick: this.kickUser.bind(this),
+    };
+
+    /**
+     * Permission-management methods for the current user.
+     */
+    public permissions: Permissions = {
+        delete: this.deletePermission.bind(this),
+        retrieve: this.getPermissions.bind(this),
+    };
+
+    public sending = new Map<string, Device>();
+
+    /**
+     * Server operations.
+     *
+     * @example
+     * ```ts
+     * const servers = await client.servers.retrieve();
+     * const created = await client.servers.create("Team Space");
+     * ```
+     */
+    public servers: Servers = {
+        /**
+         * Creates a new server.
+         * @param name: The server name.
+         *
+         * @returns - The created Server object.
+         */
+        create: this.createServer.bind(this),
+        /**
+         * Deletes a server.
+         * @param serverID: The unique serverID to delete.
+         */
+        delete: this.deleteServer.bind(this),
+        leave: this.leaveServer.bind(this),
+        /**
+         * Retrieves all servers the logged in user has access to.
+         *
+         * @returns - The list of Server objects.
+         */
+        retrieve: this.getServerList.bind(this),
+        /**
+         * Retrieves server details by its unique serverID.
+         *
+         * @returns - The requested Server object, or null if the id does not exist.
+         */
+        retrieveByID: this.getServerByID.bind(this),
+    };
+
+    /**
+     * Encryption-session helpers.
+     */
+    public sessions: Sessions = {
+        /**
+         * Marks a mnemonic verified, implying that the the user has confirmed
+         * that the session mnemonic matches with the other user.
+         * @param sessionID the sessionID of the session to mark.
+         * @param status Optionally, what to mark it as. Defaults to true.
+         */
+        markVerified: this.markSessionVerified.bind(this),
+
+        /**
+         * Gets all encryption sessions.
+         *
+         * @returns - The list of Session encryption sessions.
+         */
+        retrieve: this.getSessionList.bind(this),
+
+        /**
+         * Returns a mnemonic for the session, to verify with the other user.
+         * @param session the Session object to get the mnemonic for.
+         *
+         * @returns - The mnemonic representation of the session.
+         */
+        verify: (session: SessionSQL) => Client.getMnemonic(session),
+    };
+
+    /**
+     * User operations.
+     *
+     * @example
+     * ```ts
+     * const [user] = await client.users.retrieve("alice");
+     * const familiarUsers = await client.users.familiars();
+     * ```
+     */
+    public users: Users = {
+        /**
+         * Retrieves the list of users you can currently access, or are already familiar with.
+         *
+         * @returns - The list of User objects.
+         */
+        familiars: this.getFamiliars.bind(this),
+        /**
+         * Retrieves a user's information by a string identifier.
+         * @param identifier: A userID, hex string public key, or a username.
+         *
+         * @returns - The user's User object, or null if the user does not exist.
+         */
+        retrieve: this.fetchUser.bind(this),
+    };
+
+    private readonly database: Storage;
+
+    private readonly dbPath: string;
+
+    private device?: Device;
+
+    private deviceRecords: Record<string, Device> = {};
+
+    // ── Event subscription (composition over inheritance) ───────────────
+    private readonly emitter = new EventEmitter<ClientEvents>();
+
+    private fetchingMail: boolean = false;
+    private firstMailFetch = true;
+
+    private readonly forwarded = new Set<string>();
+
+    private readonly host: string;
+    private readonly http: AxiosInstance;
+    private readonly idKeys: KeyPair | null;
+    private isAlive: boolean = true;
+    private readonly log: Logger;
+
+    private readonly mailInterval?: NodeJS.Timeout;
+
+    private manuallyClosing: boolean = false;
+    /* Retrieves the userID with the user identifier.
+    user identifier is checked for userID, then signkey,
+    and finally falls back to username. */
+    /** Negative cache for user lookups that returned 404. TTL = 30 minutes. */
+    private readonly notFoundUsers = new Map<string, number>();
+
+    private readonly options?: ClientOptions | undefined;
+
+    private pingInterval: null | ReturnType<typeof setTimeout> = null;
+    private readonly prefixes:
+        | { HTTP: "http://"; WS: "ws://" }
+        | { HTTP: "https://"; WS: "wss://" };
+
+    private reading: boolean = false;
+    private sessionRecords: Record<string, SessionCrypto> = {};
+    // these are created from one set of sign keys
+    private readonly signKeys: KeyPair;
+
+    private socket: WebSocketLike;
+    private token: null | string = null;
+    private user?: User;
+
+    private userRecords: Record<string, User> = {};
+
+    private xKeyRing?: XKeyRing;
+
+    private constructor(
+        privateKey?: string,
+        options?: ClientOptions,
+        storage?: Storage,
+    ) {
+        // (no super — composition, not inheritance)
+        this.options = options;
+
+        this.log = options?.logger ?? {
+            debug() {},
+            error() {},
+            info() {},
+            warn() {},
+        };
+
+        this.prefixes = options?.unsafeHttp
+            ? { HTTP: "http://", WS: "ws://" }
+            : { HTTP: "https://", WS: "wss://" };
+
+        this.signKeys = privateKey
+            ? xSignKeyPairFromSecret(XUtils.decodeHex(privateKey))
+            : xSignKeyPair();
+        this.idKeys = XKeyConvert.convertKeyPair(this.signKeys);
+
+        if (!this.idKeys) {
+            throw new Error("Could not convert key to X25519!");
+        }
+
+        this.host = options?.host || "api.vex.wtf";
+        const dbFileName = options?.inMemoryDb
+            ? ":memory:"
+            : XUtils.encodeHex(this.signKeys.publicKey) + ".sqlite";
+        this.dbPath = options?.dbFolder
+            ? options.dbFolder + "/" + dbFileName
+            : dbFileName;
+
+        if (!storage) {
+            throw new Error(
+                "No storage provided. Use Client.create() which resolves storage automatically.",
+            );
+        }
+        this.database = storage;
+
+        this.database.on("error", (error: Error) => {
+            this.log.error(error.toString());
+            void this.close(true);
+        });
+
+        this.http = axios.create({ responseType: "arraybuffer" });
+
+        // Placeholder connection — replaced by initSocket() during connect()
+        this.socket = new WebSocketAdapter("ws://localhost:1234");
+        this.socket.onerror = () => {};
+
+        // Strip the `logger` field before stringifying — when a consumer
+        // passes a Winston logger instance (which has a circular
+        // `_readableState.pipes[0].parent` back-reference from the
+        // underlying file transport), JSON.stringify throws
+        // `TypeError: Converting circular structure to JSON`.
+        const { logger: _logger, ...safeOptions } = options ?? {};
+        this.log.info(
+            "Client debug information: " +
+                JSON.stringify(
+                    {
+                        dbPath: this.dbPath,
+                        environment: {
+                            platform: this.options?.deviceName ?? "unknown",
+                        },
+                        host: this.getHost(),
+                        options: safeOptions,
+                        publicKey: this.getKeys().public,
+                    },
+                    null,
+                    4,
+                ),
+        );
+    }
+    /**
      * Creates and initializes a client in one step.
      *
      * @param privateKey Optional hex secret key. When omitted, a fresh key is generated.
      * @param options Runtime options.
-     * @param storage Optional custom storage backend implementing `IStorage`.
+     * @param storage Optional custom storage backend implementing `Storage`.
      *
      * @example
      * ```ts
@@ -688,46 +984,41 @@ export class Client extends EventEmitter {
      */
     public static create = async (
         privateKey?: string,
-        options?: IClientOptions,
-        storage?: IStorage,
+        options?: ClientOptions,
+        storage?: Storage,
     ): Promise<Client> => {
         let opts = options;
-        if (!opts?.adapters) {
-            const { default: WebSocket } = await import("ws");
+        if (!opts?.logger) {
             const { createLogger: makeLog } =
                 await import("./utils/createLogger.js");
             opts = {
                 ...opts,
-                adapters: {
-                    logger: makeLog("libvex", opts?.logLevel),
-                    WebSocket: WebSocket as any,
-                },
+                logger: makeLog("libvex", opts?.logLevel),
             };
         }
-        // Lazily create Node Storage only on the Node path (no adapters).
-        // When adapters are provided (browser/RN), the caller must supply storage
-        // via PlatformPreset.createStorage() — there is no Node fallback.
+        // Lazily create Node Storage only on the Node path (no logger override).
+        // When a logger is provided (browser/RN), the caller must supply storage
+        // via BootstrapConfig.createStorage() — there is no Node fallback.
         let resolvedStorage = storage;
         if (!resolvedStorage) {
-            if (opts?.adapters) {
+            if (opts.logger) {
                 throw new Error(
-                    "No storage provided. When using adapters (browser/RN), pass storage from your PlatformPreset.",
+                    "No storage provided. When using a custom logger (browser/RN), pass storage from your BootstrapConfig.",
                 );
             }
             const { createNodeStorage } = await import("./storage/node.js");
-            const dbFileName = opts?.inMemoryDb
+            const dbFileName = opts.inMemoryDb
                 ? ":memory:"
                 : XUtils.encodeHex(
-                      nacl.sign.keyPair.fromSecretKey(
-                          XUtils.decodeHex(privateKey || ""),
-                      ).publicKey,
+                      xSignKeyPairFromSecret(XUtils.decodeHex(privateKey || ""))
+                          .publicKey,
                   ) + ".sqlite";
-            const dbPath = opts?.dbFolder
+            const dbPath = opts.dbFolder
                 ? opts.dbFolder + "/" + dbFileName
                 : dbFileName;
             resolvedStorage = createNodeStorage(
                 dbPath,
-                privateKey || XUtils.encodeHex(nacl.sign.keyPair().secretKey),
+                privateKey || XUtils.encodeHex(xSignKeyPair().secretKey),
             );
         }
         const client = new Client(privateKey, opts, resolvedStorage);
@@ -741,7 +1032,7 @@ export class Client extends EventEmitter {
      * @returns - A secret key to use for the client. Save it permanently somewhere safe.
      */
     public static generateSecretKey(): string {
-        return XUtils.encodeHex(nacl.sign.keyPair().secretKey);
+        return XUtils.encodeHex(xSignKeyPair().secretKey);
     }
 
     /**
@@ -750,20 +1041,15 @@ export class Client extends EventEmitter {
      * @returns - The username.
      */
     public static randomUsername() {
-        const IKM = XUtils.decodeHex(XUtils.encodeHex(nacl.randomBytes(16)));
+        const IKM = XUtils.decodeHex(XUtils.encodeHex(xRandomBytes(16)));
         const mnemonic = xMnemonic(IKM).split(" ");
-        const addendum = XUtils.uint8ArrToNumber(nacl.randomBytes(1));
+        const addendum = XUtils.uint8ArrToNumber(xRandomBytes(1));
 
-        return (
-            capitalize(mnemonic[0]) +
-            capitalize(mnemonic[1]) +
-            addendum.toString()
-        );
+        const word0 = mnemonic[0] ?? "";
+        const word1 = mnemonic[1] ?? "";
+        return capitalize(word0) + capitalize(word1) + addendum.toString();
     }
 
-    private static getMnemonic(session: ISessionSQL): string {
-        return xMnemonic(xKDF(XUtils.decodeHex(session.fingerprint)));
-    }
     private static deserializeExtra(
         type: MailType,
         extra: Uint8Array,
@@ -785,389 +1071,80 @@ export class Client extends EventEmitter {
         }
     }
 
-    /**
-     * User operations.
-     *
-     * @example
-     * ```ts
-     * const [user] = await client.users.retrieve("alice");
-     * const familiarUsers = await client.users.familiars();
-     * ```
-     */
-    public users: IUsers = {
-        /**
-         * Retrieves a user's information by a string identifier.
-         * @param identifier: A userID, hex string public key, or a username.
-         *
-         * @returns - The user's IUser object, or null if the user does not exist.
-         */
-        retrieve: this.retrieveUserDBEntry.bind(this),
-        /**
-         * Retrieves the list of users you can currently access, or are already familiar with.
-         *
-         * @returns - The list of IUser objects.
-         */
-        familiars: this.getFamiliars.bind(this),
-    };
+    private static getMnemonic(session: SessionSQL): string {
+        return xMnemonic(xKDF(XUtils.decodeHex(session.fingerprint)));
+    }
 
-    /**
-     * Emoji operations.
-     *
-     * @example
-     * ```ts
-     * const emoji = await client.emoji.create(imageBuffer, "party", serverID);
-     * const list = await client.emoji.retrieveList(serverID);
-     * ```
-     */
-    public emoji: IEmojis = {
-        create: this.uploadEmoji.bind(this),
-        retrieveList: this.retrieveEmojiList.bind(this),
-        retrieve: this.retrieveEmojiByID.bind(this),
-    };
+    public async close(muteEvent = false): Promise<void> {
+        this.manuallyClosing = true;
+        this.log.info("Manually closing client.");
 
-    /**
-     * Helpers for information/actions related to the currently authenticated account.
-     */
-    public me: IMe = {
-        /**
-         * Retrieves your user information
-         *
-         * @returns - The logged in user's IUser object.
-         */
-        user: this.getUser.bind(this),
-        /**
-         * Retrieves current device details
-         *
-         * @returns - The logged in device's IDevice object.
-         */
-        device: this.getDevice.bind(this),
-        /**
-         * Changes your avatar.
-         */
-        setAvatar: this.uploadAvatar.bind(this),
-    };
+        this.socket.close();
+        await this.database.close();
 
-    /**
-     * Device management methods.
-     */
-    public devices: IDevices = {
-        retrieve: this.getDeviceByID.bind(this),
-        register: this.registerDevice.bind(this),
-        delete: this.deleteDevice.bind(this),
-    };
-
-    /** File upload/download methods. */
-    public files: IFiles = {
-        /**
-         * Uploads an encrypted file and returns the details and the secret key.
-         * @param file: The file as a Buffer.
-         *
-         * @returns Details of the file uploaded and the key to encrypt in the form [details, key].
-         */
-        create: this.createFile.bind(this),
-        retrieve: this.retrieveFile.bind(this),
-    };
-
-    /**
-     * Permission-management methods for the current user.
-     */
-    public permissions: IPermissions = {
-        retrieve: this.getPermissions.bind(this),
-        delete: this.deletePermission.bind(this),
-    };
-
-    /**
-     * Server moderation helper methods.
-     */
-    public moderation: IModeration = {
-        kick: this.kickUser.bind(this),
-        fetchPermissionList: this.fetchPermissionList.bind(this),
-    };
-
-    /**
-     * Invite-management methods.
-     */
-    public invites: IInvites = {
-        create: this.createInvite.bind(this),
-        redeem: this.redeemInvite.bind(this),
-        retrieve: this.retrieveInvites.bind(this),
-    };
-
-    /**
-     * Message operations (direct and group).
-     *
-     * @example
-     * ```ts
-     * await client.messages.send(userID, "Hello!");
-     * await client.messages.group(channelID, "Hello channel!");
-     * const dmHistory = await client.messages.retrieve(userID);
-     * ```
-     */
-    public messages: IMessages = {
-        /**
-         * Send a direct message.
-         * @param userID: The userID of the user to send a message to.
-         * @param message: The message to send.
-         */
-        send: this.sendMessage.bind(this),
-        /**
-         * Send a group message to a channel.
-         * @param channelID: The channelID of the channel to send a message to.
-         * @param message: The message to send.
-         */
-        group: this.sendGroupMessage.bind(this),
-        /**
-         * Gets the message history with a specific userID.
-         * @param userID: The userID of the user to retrieve message history for.
-         *
-         * @returns - The list of IMessage objects.
-         */
-        retrieve: this.getMessageHistory.bind(this),
-        /**
-         * Gets the group message history with a specific channelID.
-         * @param chqnnelID: The channelID of the channel to retrieve message history for.
-         *
-         * @returns - The list of IMessage objects.
-         */
-        retrieveGroup: this.getGroupHistory.bind(this),
-        delete: this.deleteHistory.bind(this),
-        purge: this.purgeHistory.bind(this),
-    };
-
-    /**
-     * Encryption-session helpers.
-     */
-    public sessions: ISessions = {
-        /**
-         * Gets all encryption sessions.
-         *
-         * @returns - The list of ISession encryption sessions.
-         */
-        retrieve: this.getSessionList.bind(this),
-
-        /**
-         * Returns a mnemonic for the session, to verify with the other user.
-         * @param session the ISession object to get the mnemonic for.
-         *
-         * @returns - The mnemonic representation of the session.
-         */
-        verify: Client.getMnemonic,
-
-        /**
-         * Marks a mnemonic verified, implying that the the user has confirmed
-         * that the session mnemonic matches with the other user.
-         * @param sessionID the sessionID of the session to mark.
-         * @param status Optionally, what to mark it as. Defaults to true.
-         */
-        markVerified: this.markSessionVerified.bind(this),
-    };
-
-    /**
-     * Server operations.
-     *
-     * @example
-     * ```ts
-     * const servers = await client.servers.retrieve();
-     * const created = await client.servers.create("Team Space");
-     * ```
-     */
-    public servers: IServers = {
-        /**
-         * Retrieves all servers the logged in user has access to.
-         *
-         * @returns - The list of IServer objects.
-         */
-        retrieve: this.getServerList.bind(this),
-        /**
-         * Retrieves server details by its unique serverID.
-         *
-         * @returns - The requested IServer object, or null if the id does not exist.
-         */
-        retrieveByID: this.getServerByID.bind(this),
-        /**
-         * Creates a new server.
-         * @param name: The server name.
-         *
-         * @returns - The created IServer object.
-         */
-        create: this.createServer.bind(this),
-        /**
-         * Deletes a server.
-         * @param serverID: The unique serverID to delete.
-         */
-        delete: this.deleteServer.bind(this),
-        leave: this.leaveServer.bind(this),
-    };
-
-    /**
-     * Channel operations.
-     */
-    public channels: IChannels = {
-        /**
-         * Retrieves all channels in a server.
-         *
-         * @returns - The list of IChannel objects.
-         */
-        retrieve: this.getChannelList.bind(this),
-        /**
-         * Retrieves channel details by its unique channelID.
-         *
-         * @returns - The list of IChannel objects.
-         */
-        retrieveByID: this.getChannelByID.bind(this),
-        /**
-         * Creates a new channel in a server.
-         * @param name: The channel name.
-         * @param serverID: The unique serverID to create the channel in.
-         *
-         * @returns - The created IChannel object.
-         */
-        create: this.createChannel.bind(this),
-        /**
-         * Deletes a channel.
-         * @param channelID: The unique channelID to delete.
-         */
-        delete: this.deleteChannel.bind(this),
-        /**
-         * Retrieves a channel's userlist.
-         * @param channelID: The channelID to retrieve userlist for.
-         */
-        userList: this.getUserList.bind(this),
-    };
-
-    /**
-     * This is true if the client has ever been initialized. You can only initialize
-     * a client once.
-     */
-    public hasInit: boolean = false;
-    /**
-     * This is true if the client has ever logged in before. You can only login a client once.
-     */
-    public hasLoggedIn: boolean = false;
-
-    public sending: Record<string, IDevice> = {};
-
-    private database: IStorage;
-    private dbPath: string;
-    private conn: IWebSocketLike;
-    private host: string;
-    private adapters: IClientAdapters;
-
-    private firstMailFetch = true;
-
-    // these are created from one set of sign keys
-    private signKeys: nacl.SignKeyPair;
-    private idKeys: nacl.BoxKeyPair | null;
-
-    private xKeyRing?: IXKeyRing;
-
-    private user?: IUser;
-    private device?: IDevice;
-
-    private userRecords: Record<string, IUser> = {};
-    private deviceRecords: Record<string, IDevice> = {};
-    private sessionRecords: Record<string, ISessionCrypto> = {};
-
-    private isAlive: boolean = true;
-    private reading: boolean = false;
-    private fetchingMail: boolean = false;
-
-    private ax: AxiosInstance;
-
-    private log: ILogger;
-
-    private pingInterval: ReturnType<typeof setTimeout> | null = null;
-    private mailInterval?: NodeJS.Timeout;
-
-    private manuallyClosing: boolean = false;
-
-    private token: string | null = null;
-
-    private forwarded: string[] = [];
-
-    private prefixes:
-        | { HTTP: "http://"; WS: "ws://" }
-        | { HTTP: "https://"; WS: "wss://" };
-
-    private options?: IClientOptions;
-
-    private constructor(
-        privateKey?: string,
-        options?: IClientOptions,
-        storage?: IStorage,
-    ) {
-        super();
-        this.options = options;
-
-        this.log = options?.adapters?.logger ?? {
-            info() {},
-            warn() {},
-            error() {},
-            debug() {},
-        };
-
-        this.prefixes = options?.unsafeHttp
-            ? { HTTP: "http://", WS: "ws://" }
-            : { HTTP: "https://", WS: "wss://" };
-
-        this.signKeys = privateKey
-            ? nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(privateKey))
-            : nacl.sign.keyPair();
-        this.idKeys = XKeyConvert.convertKeyPair(this.signKeys);
-
-        if (!this.idKeys) {
-            throw new Error("Could not convert key to X25519!");
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
         }
 
-        this.host = options?.host || "api.vex.wtf";
-        const dbFileName = options?.inMemoryDb
-            ? ":memory:"
-            : XUtils.encodeHex(this.signKeys.publicKey) + ".sqlite";
-        this.dbPath = options?.dbFolder
-            ? options?.dbFolder + "/" + dbFileName
-            : dbFileName;
-
-        if (!storage) {
-            throw new Error(
-                "No storage provided. Use Client.create() which resolves storage automatically.",
-            );
+        if (this.mailInterval) {
+            clearInterval(this.mailInterval);
         }
-        this.database = storage;
+        delete this.xKeyRing;
 
-        this.database.on("error", (error) => {
-            this.log.error(error.toString());
-            this.close(true);
-        });
-
-        if (!options?.adapters) {
-            throw new Error(
-                "No adapters provided. Use Client.create() which resolves adapters automatically.",
-            );
+        if (!muteEvent) {
+            this.emitter.emit("closed");
         }
-        this.adapters = options.adapters;
+        return;
+    }
 
-        this.ax = axios.create({ responseType: "arraybuffer" });
+    /**
+     * Connects your device to the chat. You must have a valid Bearer token.
+     * You can check whoami() to see before calling connect().
+     */
+    public async connect(): Promise<void> {
+        const { token, user } = await this.whoami();
+        this.token = token;
+        this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
+        this.setUser(user);
 
-        // Placeholder connection — replaced by initSocket() during connect()
-        this.conn = new this.adapters.WebSocket("ws://localhost:1234");
-        this.conn.onerror = () => {};
+        this.device = await this.retrieveOrCreateDevice();
 
-        this.log.info(
-            "Client debug information: " +
-                JSON.stringify(
-                    {
-                        publicKey: this.getKeys().public,
-                        host: this.getHost(),
-                        dbPath: this.dbPath,
-                        environment: {
-                            platform: this.options?.deviceName ?? "unknown",
-                        },
-                        options,
-                    },
-                    null,
-                    4,
-                ),
+        const connectToken = await this.getToken("connect");
+        if (!connectToken) {
+            throw new Error("Couldn't get connect token.");
+        }
+        const signed = xSign(
+            Uint8Array.from(uuid.parse(connectToken.key)),
+            this.signKeys.secretKey,
         );
+
+        const res = await this.http.post(
+            this.getHost() + "/device/" + this.device.deviceID + "/connect",
+            msgpack.encode({ signed }),
+            { headers: { "Content-Type": "application/msgpack" } },
+        );
+        const { deviceToken } = decodeAxios(ConnectResponseCodec, res.data);
+        this.http.defaults.headers.common["X-Device-Token"] = deviceToken;
+
+        this.log.info("Starting websocket.");
+        this.initSocket();
+        // Yield the event loop so the WS open callback fires and sends the
+        // auth message before OTK generation blocks for ~5s on mobile.
+        await new Promise((r) => setTimeout(r, 0));
+        await this.negotiateOTK();
+    }
+
+    /**
+     * Manually closes the client. Emits the closed event on successful shutdown.
+     */
+    /**
+     * Delete all local data — message history, encryption sessions, and prekeys.
+     * Closes the client afterward. Credentials (keychain) must be cleared by the consumer.
+     */
+    public async deleteAllData(): Promise<void> {
+        await this.database.purgeHistory();
+        await this.database.purgeKeyData();
+        await this.close(true);
     }
 
     /**
@@ -1183,37 +1160,12 @@ export class Client extends EventEmitter {
     }
 
     /**
-     * Manually closes the client. Emits the closed event on successful shutdown.
-     */
-    public async close(muteEvent = false): Promise<void> {
-        this.manuallyClosing = true;
-        this.log.info("Manually closing client.");
-
-        this.conn.close();
-        await this.database.close();
-
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-        }
-
-        if (this.mailInterval) {
-            clearInterval(this.mailInterval);
-        }
-        delete this.xKeyRing;
-
-        if (!muteEvent) {
-            this.emit("closed");
-        }
-        return;
-    }
-
-    /**
      * Gets the hex string representations of the public and private keys.
      */
-    public getKeys(): IKeys {
+    public getKeys(): Keys {
         return {
-            public: XUtils.encodeHex(this.signKeys.publicKey),
             private: XUtils.encodeHex(this.signKeys.secretKey),
+            public: XUtils.encodeHex(this.signKeys.publicKey),
         };
     }
 
@@ -1222,40 +1174,40 @@ export class Client extends EventEmitter {
      *
      * @param username Account username.
      * @param password Account password.
-     * @returns `null` on success, or the thrown error object on failure.
+     * @returns `{ ok: true }` on success, `{ ok: false, error }` on failure.
      *
      * @example
      * ```ts
-     * const err = await client.login("alice", "correct horse battery staple");
-     * if (err) console.error(err);
+     * const result = await client.login("alice", "correct horse battery staple");
+     * if (!result.ok) console.error(result.error);
      * ```
      */
     public async login(
         username: string,
         password: string,
-    ): Promise<Error | null> {
+    ): Promise<{ error?: string; ok: boolean }> {
         try {
-            const res = await this.ax.post(
+            const res = await this.http.post(
                 this.getHost() + "/auth",
                 msgpack.encode({
-                    username,
                     password,
+                    username,
                 }),
                 {
                     headers: { "Content-Type": "application/msgpack" },
                 },
             );
-            const { user, token }: { user: IUser; token: string } =
-                msgpack.decode(new Uint8Array(res.data));
+            const { token, user } = decodeAxios(AuthResponseCodec, res.data);
 
             this.setUser(user);
             this.token = token;
-            this.ax.defaults.headers.common.Authorization = `Bearer ${token}`;
-        } catch (err) {
-            console.error(err.toString());
-            return err;
+            this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
+            return { ok: true };
+        } catch (err: unknown) {
+            const error = err instanceof Error ? err.message : String(err);
+            this.log.error("Login failed: " + error);
+            return { error, ok: false };
         }
-        return null;
     }
 
     /**
@@ -1274,7 +1226,7 @@ export class Client extends EventEmitter {
             }
             const signKeyHex = XUtils.encodeHex(this.signKeys.publicKey);
 
-            const challengeRes = await this.ax.post(
+            const challengeRes = await this.http.post(
                 this.getHost() + "/auth/device",
                 msgpack.encode({
                     deviceID: id,
@@ -1282,30 +1234,153 @@ export class Client extends EventEmitter {
                 }),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const { challengeID, challenge } = msgpack.decode(
-                new Uint8Array(challengeRes.data),
+            const { challenge, challengeID } = decodeAxios(
+                DeviceChallengeCodec,
+                challengeRes.data,
             );
 
             const signed = XUtils.encodeHex(
-                nacl.sign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
+                xSign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
             );
 
-            const verifyRes = await this.ax.post(
+            const verifyRes = await this.http.post(
                 this.getHost() + "/auth/device/verify",
                 msgpack.encode({ challengeID, signed }),
                 { headers: { "Content-Type": "application/msgpack" } },
             );
-            const { user, token }: { user: IUser; token: string } =
-                msgpack.decode(new Uint8Array(verifyRes.data));
+            const { token, user } = decodeAxios(
+                AuthResponseCodec,
+                verifyRes.data,
+            );
 
             this.setUser(user);
             this.token = token;
-            this.ax.defaults.headers.common.Authorization = `Bearer ${token}`;
-        } catch (err) {
-            this.log.error("Device-key auth failed: " + err);
-            return err instanceof Error ? err : new Error(String(err));
+            this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
+        } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            this.log.error("Device-key auth failed: " + error.message);
+            return error;
         }
         return null;
+    }
+
+    /**
+     * Logs out the current authenticated session from the server.
+     */
+    public async logout(): Promise<void> {
+        await this.http.post(this.getHost() + "/goodbye");
+    }
+
+    off<E extends keyof ClientEvents>(
+        event: E,
+        fn?: ClientEvents[E],
+        context?: unknown,
+    ): this {
+        this.emitter.off(
+            event,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- ee3 requires generic listener type; E constraint guarantees safety
+            fn as ((...args: unknown[]) => void) | undefined,
+            context,
+        );
+        return this;
+    }
+
+    on<E extends keyof ClientEvents>(
+        event: E,
+        fn: ClientEvents[E],
+        context?: unknown,
+    ): this {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- EventEmitter requires a generic listener type; the generic constraint on E guarantees type safety
+        this.emitter.on(event, fn as (...args: unknown[]) => void, context);
+        return this;
+    }
+
+    once<E extends keyof ClientEvents>(
+        event: E,
+        fn: ClientEvents[E],
+        context?: unknown,
+    ): this {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- EventEmitter requires a generic listener type; the generic constraint on E guarantees type safety
+        this.emitter.once(event, fn as (...args: unknown[]) => void, context);
+        return this;
+    }
+
+    /**
+     * Registers a new account on the server.
+     * @param username The username to register. Must be unique.
+     *
+     * @returns The error, or the user object.
+     *
+     * @example [user, err] = await client.register("MyUsername");
+     */
+    public async register(
+        username: string,
+        password: string,
+    ): Promise<[null | User, Error | null]> {
+        while (!this.xKeyRing) {
+            await sleep(100);
+        }
+        const regKey = await this.getToken("register");
+        if (regKey) {
+            const signKey = XUtils.encodeHex(this.signKeys.publicKey);
+            const signed = XUtils.encodeHex(
+                xSign(
+                    Uint8Array.from(uuid.parse(regKey.key)),
+                    this.signKeys.secretKey,
+                ),
+            );
+            const preKeyIndex = this.xKeyRing.preKeys.index;
+            const regMsg: RegistrationPayload = {
+                deviceName: this.options?.deviceName ?? "unknown",
+                password,
+                preKey: XUtils.encodeHex(
+                    this.xKeyRing.preKeys.keyPair.publicKey,
+                ),
+                preKeyIndex,
+                preKeySignature: XUtils.encodeHex(
+                    this.xKeyRing.preKeys.signature,
+                ),
+                signed,
+                signKey,
+                username,
+            };
+            try {
+                const res = await this.http.post(
+                    this.getHost() + "/register",
+                    msgpack.encode(regMsg),
+                    { headers: { "Content-Type": "application/msgpack" } },
+                );
+                this.setUser(decodeAxios(UserCodec, res.data));
+                return [this.getUser(), null];
+            } catch (err: unknown) {
+                if (isAxiosError(err) && err.response) {
+                    return [null, new Error(String(err.response.data))];
+                }
+                return [
+                    null,
+                    err instanceof Error ? err : new Error(String(err)),
+                ];
+            }
+        } else {
+            return [null, new Error("Couldn't get regkey from server.")];
+        }
+    }
+
+    removeAllListeners(event?: keyof ClientEvents): this {
+        this.emitter.removeAllListeners(event);
+        return this;
+    }
+
+    /**
+     * Returns a compact `<username><deviceID>` debug label.
+     */
+    public toString(): string {
+        return (
+            (this.user?.username ?? "") +
+            "<" +
+            (this.device?.deviceID ?? "") +
+            ">"
+        );
     }
 
     /**
@@ -1320,182 +1395,851 @@ export class Client extends EventEmitter {
      * ```
      */
     public async whoami(): Promise<{
-        user: IUser;
         exp: number;
         token: string;
+        user: User;
     }> {
-        const res = await this.ax.post(this.getHost() + "/whoami");
+        const res = await this.http.post(this.getHost() + "/whoami");
 
-        const whoami: {
-            user: IUser;
-            exp: number;
-            token: string;
-        } = msgpack.decode(new Uint8Array(res.data));
+        const whoami = decodeAxios(WhoamiCodec, res.data);
         return whoami;
     }
 
-    /**
-     * Logs out the current authenticated session from the server.
-     */
-    public async logout(): Promise<void> {
-        await this.ax.post(this.getHost() + "/goodbye");
+    private censorPreKey(preKey: PreKeysSQL): PreKeysWS {
+        if (!preKey.index) {
+            throw new Error("Key index is required.");
+        }
+        return {
+            deviceID: this.getDevice().deviceID,
+            index: preKey.index,
+            publicKey: XUtils.decodeHex(preKey.publicKey),
+            signature: XUtils.decodeHex(preKey.signature),
+        };
     }
 
-    /**
-     * Connects your device to the chat. You must have a valid Bearer token.
-     * You can check whoami() to see before calling connect().
-     */
-    public async connect(): Promise<void> {
-        const { user, token } = await this.whoami();
-        this.token = token;
-        this.ax.defaults.headers.common.Authorization = `Bearer ${token}`;
-
-        if (!user || !token) {
-            throw new Error("Auth token missing or expired. Log in again.");
-        }
-        this.setUser(user);
-
-        this.device = await this.retrieveOrCreateDevice();
-
-        const connectToken = await this.getToken("connect");
-        if (!connectToken) {
-            throw new Error("Couldn't get connect token.");
-        }
-        const signed = nacl.sign(
-            Uint8Array.from(uuid.parse(connectToken.key)),
-            this.signKeys.secretKey,
-        );
-
-        const res = await this.ax.post(
-            this.getHost() + "/device/" + this.device.deviceID + "/connect",
-            msgpack.encode({ signed }),
+    private async createChannel(
+        name: string,
+        serverID: string,
+    ): Promise<Channel> {
+        const body = { name };
+        const res = await this.http.post(
+            this.getHost() + "/server/" + serverID + "/channels",
+            msgpack.encode(body),
             { headers: { "Content-Type": "application/msgpack" } },
         );
-        const { deviceToken } = msgpack.decode(new Uint8Array(res.data));
-        this.ax.defaults.headers.common["X-Device-Token"] = deviceToken;
-
-        this.log.info("Starting websocket.");
-        this.initSocket();
-        // Yield the event loop so the WS open callback fires and sends the
-        // auth message before OTK generation blocks for ~5s on mobile.
-        await new Promise((r) => setTimeout(r, 0));
-        await this.negotiateOTK();
+        return decodeAxios(ChannelCodec, res.data);
     }
 
-    /**
-     * Registers a new account on the server.
-     * @param username The username to register. Must be unique.
-     *
-     * @returns The error, or the user object.
-     *
-     * @example [user, err] = await client.register("MyUsername");
-     */
-    public async register(
-        username: string,
-        password: string,
-    ): Promise<[IUser | null, Error | null]> {
-        while (!this.xKeyRing) {
-            await sleep(100);
-        }
-        const regKey = await this.getToken("register");
-        if (regKey) {
-            const signKey = XUtils.encodeHex(this.signKeys.publicKey);
-            const signed = XUtils.encodeHex(
-                nacl.sign(
-                    Uint8Array.from(uuid.parse(regKey.key)),
-                    this.signKeys.secretKey,
-                ),
+    // returns the file details and the encryption key
+    private async createFile(file: Uint8Array): Promise<[FileSQL, string]> {
+        this.log.info("Creating file, size: " + formatBytes(file.byteLength));
+
+        const nonce = xMakeNonce();
+        const key = xBoxKeyPair();
+        const box = xSecretbox(Uint8Array.from(file), nonce, key.secretKey);
+
+        this.log.info("Encrypted size: " + formatBytes(box.byteLength));
+
+        if (typeof FormData !== "undefined") {
+            const fpayload = new FormData();
+            fpayload.set("owner", this.getDevice().deviceID);
+            fpayload.set("nonce", XUtils.encodeHex(nonce));
+            fpayload.set("file", new Blob([new Uint8Array(box)]));
+
+            const fres = await this.http.post(
+                this.getHost() + "/file",
+                fpayload,
+                {
+                    headers: { "Content-Type": "multipart/form-data" },
+                    onUploadProgress: (progressEvent) => {
+                        const percentCompleted = Math.round(
+                            (progressEvent.loaded * 100) /
+                                (progressEvent.total ?? 1),
+                        );
+                        const { loaded, total = 0 } = progressEvent;
+                        const progress: FileProgress = {
+                            direction: "upload",
+                            loaded,
+                            progress: percentCompleted,
+                            token: XUtils.encodeHex(nonce),
+                            total,
+                        };
+                        this.emitter.emit("fileProgress", progress);
+                    },
+                },
             );
-            const regMsg: IRegistrationPayload = {
-                username,
-                signKey,
-                signed,
-                preKey: XUtils.encodeHex(
-                    this.xKeyRing.preKeys.keyPair.publicKey,
-                ),
-                preKeySignature: XUtils.encodeHex(
-                    this.xKeyRing.preKeys.signature,
-                ),
-                preKeyIndex: this.xKeyRing.preKeys.index!,
-                password,
-                deviceName: this.options?.deviceName ?? "unknown",
-            };
-            try {
-                const res = await this.ax.post(
-                    this.getHost() + "/register",
-                    msgpack.encode(regMsg),
-                    { headers: { "Content-Type": "application/msgpack" } },
-                );
-                this.setUser(msgpack.decode(new Uint8Array(res.data)));
-                return [this.getUser(), null];
-            } catch (err) {
-                if (err.response) {
-                    return [null, new Error(err.response.data.error)];
-                } else {
-                    return [null, err];
-                }
-            }
-        } else {
-            return [null, new Error("Couldn't get regkey from server.")];
+            const fcreatedFile = decodeAxios(FileSQLCodec, fres.data);
+
+            return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
         }
-    }
 
-    /**
-     * Returns a compact `<username><deviceID>` debug label.
-     */
-    public override toString(): string {
-        return this.user?.username + "<" + this.device?.deviceID + ">";
-    }
-
-    private async redeemInvite(inviteID: string): Promise<IPermission> {
-        const res = await this.ax.patch(this.getHost() + "/invite/" + inviteID);
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async retrieveInvites(serverID: string): Promise<IInvite[]> {
-        const res = await this.ax.get(
-            this.getHost() + "/server/" + serverID + "/invites",
+        const payload: {
+            file: string;
+            nonce: string;
+            owner: string;
+        } = {
+            file: XUtils.encodeBase64(box),
+            nonce: XUtils.encodeHex(nonce),
+            owner: this.getDevice().deviceID,
+        };
+        const res = await this.http.post(
+            this.getHost() + "/file/json",
+            msgpack.encode(payload),
+            { headers: { "Content-Type": "application/msgpack" } },
         );
-        return msgpack.decode(new Uint8Array(res.data));
+        const createdFile = decodeAxios(FileSQLCodec, res.data);
+
+        return [createdFile, XUtils.encodeHex(key.secretKey)];
     }
 
     private async createInvite(serverID: string, duration: string) {
         const payload = {
-            serverID,
             duration,
+            serverID,
         };
 
-        const res = await this.ax.post(
+        const res = await this.http.post(
             this.getHost() + "/server/" + serverID + "/invites",
             payload,
         );
 
-        return msgpack.decode(new Uint8Array(res.data));
+        return decodeAxios(InviteCodec, res.data);
     }
 
-    private async retrieveEmojiList(serverID: string): Promise<IEmoji[]> {
-        const res = await this.ax.get(
-            this.getHost() + "/server/" + serverID + "/emoji",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
+    private createPreKey(): UnsavedPreKey {
+        const preKeyPair = xBoxKeyPair();
+        return {
+            keyPair: preKeyPair,
+            signature: xSign(
+                xEncode(xConstants.CURVE, preKeyPair.publicKey),
+                this.signKeys.secretKey,
+            ),
+        };
     }
 
-    private async retrieveEmojiByID(emojiID: string): Promise<IEmoji | null> {
-        const res = await this.ax.get(
-            this.getHost() + "/emoji/" + emojiID + "/details",
+    private async createServer(name: string): Promise<Server> {
+        const res = await this.http.post(
+            this.getHost() + "/server/" + globalThis.btoa(name),
         );
-        if (!res.data) {
+        return decodeAxios(ServerCodec, res.data);
+    }
+
+    private async createSession(
+        device: Device,
+        user: User,
+        message: Uint8Array,
+        group: null | Uint8Array,
+        /* this is passed through if the first message is 
+        part of a group message */
+        mailID: null | string,
+        forward: boolean,
+    ): Promise<void> {
+        let keyBundle: KeyBundle;
+
+        this.log.info(
+            "Requesting key bundle for device: " +
+                JSON.stringify(device, null, 4),
+        );
+        try {
+            keyBundle = await this.retrieveKeyBundle(device.deviceID);
+        } catch (err: unknown) {
+            this.log.warn(
+                "Couldn't get key bundle:",
+                err instanceof Error ? err.message : String(err),
+            );
+            return;
+        }
+
+        this.log.warn(
+            this.toString() +
+                " retrieved keybundle #" +
+                String(keyBundle.otk?.index ?? "none") +
+                " for " +
+                device.deviceID,
+        );
+
+        if (!this.xKeyRing) {
+            throw new Error("Key ring not initialized.");
+        }
+
+        // my keys
+        const IK_A = this.xKeyRing.identityKeys.secretKey;
+        const IK_AP = this.xKeyRing.identityKeys.publicKey;
+        const EK_A = this.xKeyRing.ephemeralKeys.secretKey;
+
+        // their keys
+        const IK_B_raw = XKeyConvert.convertPublicKey(
+            new Uint8Array(keyBundle.signKey),
+        );
+        if (!IK_B_raw) {
+            throw new Error("Could not convert sign key to X25519.");
+        }
+        const IK_B = IK_B_raw;
+        const SPK_B = new Uint8Array(keyBundle.preKey.publicKey);
+        const OPK_B = keyBundle.otk
+            ? new Uint8Array(keyBundle.otk.publicKey)
+            : null;
+
+        // diffie hellman functions
+        const DH1 = xDH(new Uint8Array(IK_A), SPK_B);
+        const DH2 = xDH(new Uint8Array(EK_A), IK_B);
+        const DH3 = xDH(new Uint8Array(EK_A), SPK_B);
+        const DH4 = OPK_B ? xDH(new Uint8Array(EK_A), OPK_B) : null;
+
+        // initial key material
+        const IKM = DH4 ? xConcat(DH1, DH2, DH3, DH4) : xConcat(DH1, DH2, DH3);
+
+        // one time key index
+        const IDX = keyBundle.otk
+            ? XUtils.numberToUint8Arr(keyBundle.otk.index ?? 0)
+            : XUtils.numberToUint8Arr(0);
+
+        // shared secret key
+        const SK = xKDF(IKM);
+        this.log.info("Obtained SK, " + XUtils.encodeHex(SK));
+
+        const PK = xBoxKeyPairFromSecret(SK).publicKey;
+        this.log.info(
+            this.toString() +
+                " Obtained PK for " +
+                device.deviceID +
+                " " +
+                XUtils.encodeHex(PK),
+        );
+
+        const AD = xConcat(
+            xEncode(xConstants.CURVE, IK_AP),
+            xEncode(xConstants.CURVE, IK_B),
+        );
+
+        const nonce = xMakeNonce();
+        const cipher = xSecretbox(message, nonce, SK);
+
+        this.log.info("Encrypted ciphertext.");
+
+        /* 32 bytes for signkey, 32 bytes for ephemeral key, 
+        68 bytes for AD, 6 bytes for otk index (empty for no otk) */
+        const extra = xConcat(
+            this.signKeys.publicKey,
+            this.xKeyRing.ephemeralKeys.publicKey,
+            PK,
+            AD,
+            IDX,
+        );
+
+        const mail: MailWS = {
+            authorID: this.getUser().userID,
+            cipher,
+            extra,
+            forward,
+            group,
+            mailID: mailID || uuid.v4(),
+            mailType: MailType.initial,
+            nonce,
+            readerID: user.userID,
+            recipient: device.deviceID,
+            sender: this.getDevice().deviceID,
+        };
+
+        const hmac = xHMAC(mail, SK);
+        this.log.info("Mail hash: " + JSON.stringify(mail));
+        this.log.info("Generated hmac: " + XUtils.encodeHex(hmac));
+
+        const msg: ResourceMsg = {
+            action: "CREATE",
+            data: mail,
+            resourceType: "mail",
+            transmissionID: uuid.v4(),
+            type: "resource",
+        };
+
+        // discard the ephemeral keys
+        this.newEphemeralKeys();
+
+        // save the encryption session
+        this.log.info("Saving new session.");
+        const sessionEntry: SessionSQL = {
+            deviceID: device.deviceID,
+            fingerprint: XUtils.encodeHex(AD),
+            lastUsed: new Date().toISOString(),
+            mode: "initiator",
+            publicKey: XUtils.encodeHex(PK),
+            sessionID: uuid.v4(),
+            SK: XUtils.encodeHex(SK),
+            userID: user.userID,
+            verified: false,
+        };
+
+        await this.database.saveSession(sessionEntry);
+
+        this.emitter.emit("session", sessionEntry, user);
+
+        // emit the message
+        const forwardedMsg = forward
+            ? messageSchema.parse(msgpack.decode(message))
+            : null;
+        const emitMsg: Message = forwardedMsg
+            ? { ...forwardedMsg, forward: true }
+            : {
+                  authorID: mail.authorID,
+                  decrypted: true,
+                  direction: "outgoing",
+                  forward: mail.forward,
+                  group: mail.group ? uuid.stringify(mail.group) : null,
+                  mailID: mail.mailID,
+                  message: XUtils.encodeUTF8(message),
+                  nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
+                  readerID: mail.readerID,
+                  recipient: mail.recipient,
+                  sender: mail.sender,
+                  timestamp: new Date().toISOString(),
+              };
+        this.emitter.emit("message", emitMsg);
+
+        // send mail and wait for response
+        await new Promise((res, rej) => {
+            const callback = (packedMsg: Uint8Array) => {
+                const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
+                if (receivedMsg.transmissionID === msg.transmissionID) {
+                    this.socket.off("message", callback);
+                    const parsed = WSMessageSchema.safeParse(receivedMsg);
+                    if (parsed.success && parsed.data.type === "success") {
+                        res(parsed.data.data);
+                    } else {
+                        rej(
+                            new Error(
+                                "Mail delivery failed: " +
+                                    JSON.stringify(receivedMsg),
+                            ),
+                        );
+                    }
+                }
+            };
+            this.socket.on("message", callback);
+            void this.send(msg, hmac);
+            this.log.info("Mail sent.");
+        });
+        this.sending.delete(device.deviceID);
+    }
+
+    private async deleteChannel(channelID: string): Promise<void> {
+        await this.http.delete(this.getHost() + "/channel/" + channelID);
+    }
+
+    private async deleteDevice(deviceID: string): Promise<void> {
+        if (deviceID === this.getDevice().deviceID) {
+            throw new Error("You can't delete the device you're logged in to.");
+        }
+        await this.http.delete(
+            this.prefixes.HTTP +
+                this.host +
+                "/user/" +
+                this.getUser().userID +
+                "/devices/" +
+                deviceID,
+        );
+    }
+
+    private async deleteHistory(channelOrUserID: string): Promise<void> {
+        await this.database.deleteHistory(channelOrUserID);
+    }
+
+    private async deletePermission(permissionID: string): Promise<void> {
+        await this.http.delete(this.getHost() + "/permission/" + permissionID);
+    }
+
+    private async deleteServer(serverID: string): Promise<void> {
+        await this.http.delete(this.getHost() + "/server/" + serverID);
+    }
+    /**
+     * Gets a list of permissions for a server.
+     *
+     * @returns - The list of Permissions objects.
+     */
+    private async fetchPermissionList(serverID: string): Promise<Permission[]> {
+        const res = await this.http.get(
+            this.prefixes.HTTP +
+                this.host +
+                "/server/" +
+                serverID +
+                "/permissions",
+        );
+        return decodeAxios(PermissionArrayCodec, res.data);
+    }
+
+    private async fetchUser(
+        userIdentifier: string,
+    ): Promise<[null | User, AxiosError | null]> {
+        // Positive cache
+        if (userIdentifier in this.userRecords) {
+            return [this.userRecords[userIdentifier] ?? null, null];
+        }
+
+        // Negative cache — skip users we know don't exist (TTL-based)
+        const notFoundAt = this.notFoundUsers.get(userIdentifier);
+        if (notFoundAt && Date.now() - notFoundAt < Client.NOT_FOUND_TTL) {
+            return [null, null];
+        }
+
+        try {
+            const res = await this.http.get(
+                this.getHost() + "/user/" + userIdentifier,
+            );
+            const userRecord = decodeAxios(UserCodec, res.data);
+            this.userRecords[userIdentifier] = userRecord;
+            this.notFoundUsers.delete(userIdentifier);
+            return [userRecord, null];
+        } catch (err: unknown) {
+            if (isAxiosError(err) && err.response?.status === 404) {
+                // Definitive: user doesn't exist — cache and don't retry
+                this.notFoundUsers.set(userIdentifier, Date.now());
+                return [null, err];
+            }
+            // Transient (5xx, network error) — don't cache, caller can retry
+            return [null, isAxiosError(err) ? err : null];
+        }
+    }
+
+    private async forward(message: Message) {
+        const copy = { ...message };
+
+        if (this.forwarded.has(copy.mailID)) {
+            return;
+        }
+        this.forwarded.add(copy.mailID);
+        if (this.forwarded.size > 1000) {
+            // Remove oldest entry
+            const first = this.forwarded.values().next().value;
+            if (first !== undefined) this.forwarded.delete(first);
+        }
+
+        const msgBytes = Uint8Array.from(msgpack.encode(copy));
+
+        const devices = await this.getUserDeviceList(this.getUser().userID);
+        this.log.info(
+            "Forwarding to my other devices, deviceList length is " +
+                String(devices?.length ?? 0),
+        );
+
+        if (!devices) {
+            throw new Error("Couldn't get own devices.");
+        }
+        const promises = [];
+        for (const device of devices) {
+            if (device.deviceID !== this.getDevice().deviceID) {
+                promises.push(
+                    this.sendMail(
+                        device,
+                        this.getUser(),
+                        msgBytes,
+                        null,
+                        copy.mailID,
+                        true,
+                    ),
+                );
+            }
+        }
+        void Promise.allSettled(promises).then((results) => {
+            for (const result of results) {
+                const { status } = result;
+                if (status === "rejected") {
+                    this.log.warn("Message failed.");
+                    this.log.warn(JSON.stringify(result));
+                }
+            }
+        });
+    }
+
+    private async getChannelByID(channelID: string): Promise<Channel | null> {
+        try {
+            const res = await this.http.get(
+                this.getHost() + "/channel/" + channelID,
+            );
+            return decodeAxios(ChannelCodec, res.data);
+        } catch (_err: unknown) {
             return null;
         }
-        return msgpack.decode(new Uint8Array(res.data));
     }
 
-    private async leaveServer(serverID: string): Promise<void> {
-        const permissionList = await this.permissions.retrieve();
-        for (const permission of permissionList) {
-            if (permission.resourceID === serverID) {
-                await this.deletePermission(permission.permissionID);
+    private async getChannelList(serverID: string): Promise<Channel[]> {
+        const res = await this.http.get(
+            this.getHost() + "/server/" + serverID + "/channels",
+        );
+        return decodeAxios(ChannelArrayCodec, res.data);
+    }
+
+    private getDevice(): Device {
+        if (!this.device) {
+            throw new Error(
+                "You must wait until the auth event is emitted before fetching device details.",
+            );
+        }
+        return this.device;
+    }
+
+    private async getDeviceByID(deviceID: string): Promise<Device | null> {
+        if (deviceID in this.deviceRecords) {
+            this.log.info("Found device in local cache.");
+            return this.deviceRecords[deviceID] ?? null;
+        }
+
+        const device = await this.database.getDevice(deviceID);
+        if (device) {
+            this.log.info("Found device in local db.");
+            this.deviceRecords[deviceID] = device;
+            return device;
+        }
+        try {
+            const res = await this.http.get(
+                this.getHost() + "/device/" + deviceID,
+            );
+            this.log.info("Retrieved device from server.");
+            const fetchedDevice = decodeAxios(DeviceCodec, res.data);
+            this.deviceRecords[deviceID] = fetchedDevice;
+            await this.database.saveDevice(fetchedDevice);
+            return fetchedDevice;
+        } catch (_err: unknown) {
+            return null;
+        }
+    }
+
+    /* Retrieves the current list of users you have sessions with. */
+    private async getFamiliars(): Promise<User[]> {
+        const sessions = await this.database.getAllSessions();
+        const familiars: User[] = [];
+
+        for (const session of sessions) {
+            const [user, _err] = await this.fetchUser(session.userID);
+            if (user) {
+                familiars.push(user);
             }
+        }
+
+        return familiars;
+    }
+
+    private async getGroupHistory(channelID: string): Promise<Message[]> {
+        const messages: Message[] =
+            await this.database.getGroupHistory(channelID);
+
+        return messages;
+    }
+
+    private async getMail(): Promise<void> {
+        while (this.fetchingMail) {
+            await sleep(500);
+        }
+        this.fetchingMail = true;
+        let firstFetch = false;
+        if (this.firstMailFetch) {
+            firstFetch = true;
+            this.firstMailFetch = false;
+        }
+
+        if (firstFetch) {
+            this.emitter.emit("decryptingMail");
+        }
+
+        this.log.info("fetching mail for device " + this.getDevice().deviceID);
+        try {
+            const res = await this.http.post<ArrayBuffer>(
+                this.getHost() +
+                    "/device/" +
+                    this.getDevice().deviceID +
+                    "/mail",
+            );
+            const mailBuffer = new Uint8Array(res.data);
+            const rawInbox = z
+                .array(mailInboxEntry)
+                .parse(msgpack.decode(mailBuffer));
+            const inbox = rawInbox.sort((a, b) => b[2].localeCompare(a[2]));
+
+            for (const mailDetails of inbox) {
+                const [mailHeader, mailBody, timestamp] = mailDetails;
+                try {
+                    await this.readMail(mailHeader, mailBody, timestamp);
+                } catch (err: unknown) {
+                    console.warn(String(err));
+                }
+            }
+        } catch (err: unknown) {
+            console.warn(String(err));
+        }
+        this.fetchingMail = false;
+    }
+
+    private async getMessageHistory(userID: string): Promise<Message[]> {
+        const messages: Message[] =
+            await this.database.getMessageHistory(userID);
+
+        return messages;
+    }
+
+    private async getMultiUserDeviceList(userIDs: string[]): Promise<Device[]> {
+        try {
+            const res = await this.http.post(
+                this.getHost() + "/deviceList",
+                msgpack.encode(userIDs),
+                { headers: { "Content-Type": "application/msgpack" } },
+            );
+            const devices = decodeAxios(DeviceArrayCodec, res.data);
+            for (const device of devices) {
+                this.deviceRecords[device.deviceID] = device;
+            }
+
+            return devices;
+        } catch (_err: unknown) {
+            return [];
+        }
+    }
+
+    private async getOTKCount(): Promise<number> {
+        const res = await this.http.get(
+            this.getHost() +
+                "/device/" +
+                this.getDevice().deviceID +
+                "/otk/count",
+        );
+        return decodeAxios(OtkCountCodec, res.data).count;
+    }
+
+    /**
+     * Gets all permissions for the logged in user.
+     *
+     * @returns - The list of Permissions objects.
+     */
+    private async getPermissions(): Promise<Permission[]> {
+        const res = await this.http.get(
+            this.getHost() + "/user/" + this.getUser().userID + "/permissions",
+        );
+        return decodeAxios(PermissionArrayCodec, res.data);
+    }
+
+    private async getServerByID(serverID: string): Promise<null | Server> {
+        try {
+            const res = await this.http.get(
+                this.getHost() + "/server/" + serverID,
+            );
+            return decodeAxios(ServerCodec, res.data);
+        } catch (_err: unknown) {
+            return null;
+        }
+    }
+
+    private async getServerList(): Promise<Server[]> {
+        const res = await this.http.get(
+            this.getHost() + "/user/" + this.getUser().userID + "/servers",
+        );
+        return decodeAxios(ServerArrayCodec, res.data);
+    }
+
+    private async getSessionByPubkey(publicKey: Uint8Array) {
+        const strPubKey = XUtils.encodeHex(publicKey);
+        if (strPubKey in this.sessionRecords) {
+            return this.sessionRecords[strPubKey];
+        }
+        const session = await this.database.getSessionByPublicKey(publicKey);
+        if (session) {
+            this.sessionRecords[strPubKey] = session;
+        }
+        return session;
+    }
+
+    private async getSessionList() {
+        return this.database.getAllSessions();
+    }
+
+    private async getToken(
+        type:
+            | "avatar"
+            | "connect"
+            | "device"
+            | "emoji"
+            | "file"
+            | "invite"
+            | "register",
+    ): Promise<ActionToken | null> {
+        try {
+            const res = await this.http.get(this.getHost() + "/token/" + type, {
+                responseType: "arraybuffer",
+            });
+            return decodeAxios(ActionTokenCodec, res.data);
+        } catch (err: unknown) {
+            this.log.warn(String(err));
+            return null;
+        }
+    }
+
+    /* Get the currently logged in user. You cannot call this until
+    after the auth event is emitted. */
+    private getUser(): User {
+        if (!this.user) {
+            throw new Error(
+                "You must wait until the auth event is emitted before fetching user details.",
+            );
+        }
+        return this.user;
+    }
+
+    private async getUserDeviceList(userID: string): Promise<Device[] | null> {
+        try {
+            const res = await this.http.get(
+                this.getHost() + "/user/" + userID + "/devices",
+            );
+            const devices = decodeAxios(DeviceArrayCodec, res.data);
+            for (const device of devices) {
+                this.deviceRecords[device.deviceID] = device;
+            }
+
+            return devices;
+        } catch (_err: unknown) {
+            return null;
+        }
+    }
+
+    private async getUserList(channelID: string): Promise<User[]> {
+        const res = await this.http.post(
+            this.getHost() + "/userList/" + channelID,
+        );
+        return decodeAxios(UserArrayCodec, res.data);
+    }
+
+    private async handleNotify(msg: NotifyMsg) {
+        switch (msg.event) {
+            case "mail":
+                this.log.info("Server has informed us of new mail.");
+                await this.getMail();
+                this.fetchingMail = false;
+                break;
+            case "permission":
+                this.emitter.emit(
+                    "permission",
+                    PermissionSchema.parse(msg.data),
+                );
+                break;
+            case "retryRequest":
+                // msg.data is the messageID for retry
+                break;
+            default:
+                this.log.info("Unsupported notification event " + msg.event);
+                break;
+        }
+    }
+
+    /**
+     * Initializes the keyring. This must be called before anything else.
+     */
+    private async init(): Promise<void> {
+        if (this.hasInit) {
+            throw new Error("You should only call init() once.");
+        }
+        this.hasInit = true;
+
+        await this.populateKeyRing();
+        this.emitter.on("message", (message) => {
+            if (message.direction === "outgoing" && !message.forward) {
+                void this.forward(message);
+            }
+
+            if (
+                message.direction === "incoming" &&
+                message.recipient === message.sender
+            ) {
+                return;
+            }
+            void this.database.saveMessage(message);
+        });
+        this.emitter.emit("ready");
+    }
+
+    private initSocket() {
+        try {
+            if (!this.token) {
+                throw new Error("No token found, did you call login()?");
+            }
+
+            const wsUrl = this.prefixes.WS + this.host + "/socket";
+            // Auth sent as first message after open
+            this.socket = new WebSocketAdapter(wsUrl);
+            this.socket.on("open", () => {
+                this.log.info("Connection opened.");
+                // Send auth as first message (encoded to bytes — protocol is binary).
+                const authMsg = JSON.stringify({
+                    token: this.token,
+                    type: "auth",
+                });
+                this.socket.send(new TextEncoder().encode(authMsg));
+                this.pingInterval = setInterval(this.ping.bind(this), 15000);
+            });
+
+            this.socket.on("close", () => {
+                this.log.info("Connection closed.");
+                if (this.pingInterval) {
+                    clearInterval(this.pingInterval);
+                    this.pingInterval = null;
+                }
+                if (!this.manuallyClosing) {
+                    this.emitter.emit("disconnect");
+                }
+            });
+
+            this.socket.on("error", (error: Error) => {
+                throw error;
+            });
+
+            this.socket.on("message", (message: Uint8Array) => {
+                const [header, raw] = XUtils.unpackMessage(message);
+
+                this.log.debug("INH " + XUtils.encodeHex(header));
+                this.log.debug("IN " + JSON.stringify(raw, null, 4));
+
+                const parseResult = WSMessageSchema.safeParse(raw);
+                if (!parseResult.success) {
+                    this.log.warn("Unknown WS message: " + JSON.stringify(raw));
+                    return;
+                }
+                const msg = parseResult.data;
+
+                switch (msg.type) {
+                    case "challenge":
+                        this.log.info("Received challenge from server.");
+                        this.respond(msg);
+                        break;
+                    case "error":
+                        this.log.warn(JSON.stringify(msg));
+                        break;
+                    case "notify":
+                        void this.handleNotify(msg);
+                        break;
+                    case "ping":
+                        this.pong(msg.transmissionID);
+                        break;
+                    case "pong":
+                        this.setAlive(true);
+                        break;
+                    case "success":
+                        break;
+                    case "unauthorized":
+                        throw new Error(
+                            "Received unauthorized message from server.",
+                        );
+                    case "authorized":
+                        this.log.info(
+                            "Authenticated with userID " +
+                                (this.user?.userID ?? "unknown"),
+                        );
+                        this.emitter.emit("connected");
+                        void this.postAuth();
+                        break;
+                    default:
+                        this.log.info("Unsupported message " + msg.type);
+                        break;
+                }
+            });
+        } catch (err: unknown) {
+            throw new Error(
+                "Error initiating websocket connection " + String(err),
+            );
         }
     }
 
@@ -1510,74 +2254,648 @@ export class Client extends EventEmitter {
         throw new Error("Couldn't kick user.");
     }
 
-    private async uploadEmoji(
-        emoji: Uint8Array,
-        name: string,
-        serverID: string,
-    ): Promise<IEmoji | null> {
-        if (typeof FormData !== "undefined") {
-            const fpayload = new FormData();
-            fpayload.set("emoji", new Blob([new Uint8Array(emoji)]));
-            fpayload.set("name", name);
-
-            try {
-                const res = await this.ax.post(
-                    this.getHost() + "/emoji/" + serverID,
-                    fpayload,
-                    {
-                        headers: { "Content-Type": "multipart/form-data" },
-                        onUploadProgress: (progressEvent) => {
-                            const percentCompleted = Math.round(
-                                (progressEvent.loaded * 100) /
-                                    (progressEvent.total ?? 1),
-                            );
-                            const { loaded, total = 0 } = progressEvent;
-                            const progress: IFileProgress = {
-                                direction: "upload",
-                                token: name,
-                                progress: percentCompleted,
-                                loaded,
-                                total,
-                            };
-                            this.emit("fileProgress", progress);
-                        },
-                    },
-                );
-                return msgpack.decode(new Uint8Array(res.data));
-            } catch (err) {
-                return null;
+    private async leaveServer(serverID: string): Promise<void> {
+        const permissionList = await this.permissions.retrieve();
+        for (const permission of permissionList) {
+            if (permission.resourceID === serverID) {
+                await this.deletePermission(permission.permissionID);
             }
-        }
-
-        const payload: { file: string; name: string } = {
-            file: XUtils.encodeBase64(emoji),
-            name,
-        };
-        try {
-            const res = await this.ax.post(
-                this.getHost() + "/emoji/" + serverID + "/json",
-                msgpack.encode(payload),
-                { headers: { "Content-Type": "application/msgpack" } },
-            );
-            return msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            return null;
         }
     }
 
-    private async retrieveOrCreateDevice(): Promise<IDevice> {
-        let device: IDevice;
+    private async markSessionVerified(sessionID: string) {
+        return this.database.markSessionVerified(sessionID);
+    }
+
+    private async negotiateOTK() {
+        const otkCount = await this.getOTKCount();
+        this.log.info("Server reported OTK: " + otkCount.toString());
+        const needs = xConstants.MIN_OTK_SUPPLY - otkCount;
+        if (needs === 0) {
+            this.log.info("Server otk supply full.");
+            return;
+        }
+
+        await this.submitOTK(needs);
+    }
+
+    private newEphemeralKeys() {
+        if (!this.xKeyRing) {
+            throw new Error("Key ring not initialized.");
+        }
+        this.xKeyRing.ephemeralKeys = xBoxKeyPair();
+    }
+
+    private ping() {
+        if (!this.isAlive) {
+            this.log.warn("Ping failed.");
+        }
+        this.setAlive(false);
+        void this.send({ transmissionID: uuid.v4(), type: "ping" });
+    }
+
+    private pong(transmissionID: string) {
+        void this.send({ transmissionID, type: "pong" });
+    }
+
+    private async populateKeyRing() {
+        // we've checked in the constructor that these exist
+        if (!this.idKeys) {
+            throw new Error("Identity keys are missing.");
+        }
+        const identityKeys = this.idKeys;
+
+        const existingPreKeys = await this.database.getPreKeys();
+        const preKeys: PreKeysCrypto =
+            existingPreKeys ??
+            (await (async () => {
+                this.log.warn(
+                    "No prekeys found in database, creating a new one.",
+                );
+                const unsaved = this.createPreKey();
+                const [saved] = await this.database.savePreKeys(
+                    [unsaved],
+                    false,
+                );
+                if (!saved || saved.index == null)
+                    throw new Error(
+                        "Failed to save prekey — no index returned.",
+                    );
+                return { ...unsaved, index: saved.index };
+            })());
+
+        const sessions = await this.database.getAllSessions();
+        for (const session of sessions) {
+            this.sessionRecords[session.publicKey] =
+                sqlSessionToCrypto(session);
+        }
+
+        const ephemeralKeys = xBoxKeyPair();
+
+        this.xKeyRing = {
+            ephemeralKeys,
+            identityKeys,
+            preKeys,
+        };
+
+        this.log.info(
+            "Keyring populated:\n" +
+                JSON.stringify(
+                    {
+                        ephemeralKey: XUtils.encodeHex(ephemeralKeys.publicKey),
+                        preKey: XUtils.encodeHex(preKeys.keyPair.publicKey),
+                        signKey: XUtils.encodeHex(this.signKeys.publicKey),
+                    },
+                    null,
+                    4,
+                ),
+        );
+    }
+
+    private async postAuth() {
+        let count = 0;
+        for (;;) {
+            try {
+                await this.getMail();
+                count++;
+                this.fetchingMail = false;
+
+                if (count > 10) {
+                    void this.negotiateOTK();
+                    count = 0;
+                }
+            } catch (err: unknown) {
+                this.log.warn("Problem fetching mail" + String(err));
+            }
+            await sleep(1000 * 60);
+        }
+    }
+
+    private async purgeHistory(): Promise<void> {
+        await this.database.purgeHistory();
+    }
+
+    private async readMail(
+        header: Uint8Array,
+        mail: MailWS,
+        timestamp: string,
+    ) {
+        this.sendReceipt(new Uint8Array(mail.nonce));
+        let timeout = 1;
+        while (this.reading) {
+            await sleep(timeout);
+            timeout *= 2;
+        }
+        this.reading = true;
+
         try {
-            const res = await this.ax.get(
+            const healSession = async () => {
+                this.log.info("Requesting retry of " + mail.mailID);
+                const deviceEntry = await this.getDeviceByID(mail.sender);
+                const [user, _err] = await this.fetchUser(mail.authorID);
+                if (deviceEntry && user) {
+                    void this.createSession(
+                        deviceEntry,
+                        user,
+                        XUtils.decodeUTF8(`��RETRY_REQUEST:${mail.mailID}��`),
+                        mail.group,
+                        uuid.v4(),
+                        false,
+                    );
+                }
+            };
+
+            this.log.info("Received mail from " + mail.sender);
+            switch (mail.mailType) {
+                case MailType.initial:
+                    this.log.info("Initiating new session.");
+                    const extraParts = Client.deserializeExtra(
+                        MailType.initial,
+                        new Uint8Array(mail.extra),
+                    );
+                    const signKey = extraParts[0];
+                    const ephKey = extraParts[1];
+                    const indexBytes = extraParts[3];
+                    if (!signKey || !ephKey || !indexBytes) {
+                        throw new Error(
+                            "Malformed initial mail extra: missing signKey, ephKey, or indexBytes",
+                        );
+                    }
+
+                    const preKeyIndex = XUtils.uint8ArrToNumber(indexBytes);
+
+                    this.log.info(
+                        this.toString() +
+                            " otk #" +
+                            String(preKeyIndex) +
+                            " indicated",
+                    );
+
+                    const otk =
+                        preKeyIndex === 0
+                            ? null
+                            : await this.database.getOneTimeKey(preKeyIndex);
+
+                    if (otk) {
+                        this.log.info(
+                            "otk #" +
+                                JSON.stringify(otk.index) +
+                                " retrieved from database.",
+                        );
+                    }
+
+                    this.log.info("signKey: " + XUtils.encodeHex(signKey));
+                    this.log.info("preKey: " + XUtils.encodeHex(ephKey));
+                    if (otk) {
+                        this.log.info(
+                            "OTK: " + XUtils.encodeHex(otk.keyPair.publicKey),
+                        );
+                    }
+
+                    if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
+                        this.log.warn(
+                            "OTK index mismatch, received " +
+                                JSON.stringify(otk?.index) +
+                                ", expected " +
+                                preKeyIndex.toString(),
+                        );
+                        return;
+                    }
+
+                    // their public keys
+                    const IK_A_raw = XKeyConvert.convertPublicKey(signKey);
+                    if (!IK_A_raw) {
+                        this.log.warn("Could not convert sign key to X25519.");
+                        return;
+                    }
+                    const IK_A = IK_A_raw;
+                    const EK_A = ephKey;
+
+                    if (!this.xKeyRing) {
+                        throw new Error("Key ring not initialized.");
+                    }
+                    // my private keys
+                    const IK_B = this.xKeyRing.identityKeys.secretKey;
+                    const IK_BP = this.xKeyRing.identityKeys.publicKey;
+                    const SPK_B = this.xKeyRing.preKeys.keyPair.secretKey;
+                    const OPK_B = otk ? otk.keyPair.secretKey : null;
+
+                    // diffie hellman functions
+                    const DH1 = xDH(SPK_B, IK_A);
+                    const DH2 = xDH(IK_B, EK_A);
+                    const DH3 = xDH(SPK_B, EK_A);
+                    const DH4 = OPK_B ? xDH(OPK_B, EK_A) : null;
+
+                    // initial key material
+                    const IKM = DH4
+                        ? xConcat(DH1, DH2, DH3, DH4)
+                        : xConcat(DH1, DH2, DH3);
+
+                    // shared secret key
+                    const SK = xKDF(IKM);
+                    this.log.info(
+                        "Obtained SK for " +
+                            mail.sender +
+                            ", " +
+                            XUtils.encodeHex(SK),
+                    );
+
+                    // shared public key
+                    const PK = xBoxKeyPairFromSecret(SK).publicKey;
+                    this.log.info(
+                        this.toString() +
+                            "Obtained PK for " +
+                            mail.sender +
+                            " " +
+                            XUtils.encodeHex(PK),
+                    );
+
+                    const hmac = xHMAC(mail, SK);
+                    this.log.info("Mail hash: " + JSON.stringify(mail));
+                    this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
+
+                    // associated data
+                    const AD = xConcat(
+                        xEncode(xConstants.CURVE, IK_A),
+                        xEncode(xConstants.CURVE, IK_BP),
+                    );
+
+                    if (!XUtils.bytesEqual(hmac, header)) {
+                        console.warn(
+                            "Mail authentication failed (HMAC did not match).",
+                        );
+                        console.warn(mail);
+                        return;
+                    }
+                    this.log.info("Mail authenticated successfully.");
+
+                    const unsealed = xSecretboxOpen(
+                        new Uint8Array(mail.cipher),
+                        new Uint8Array(mail.nonce),
+                        SK,
+                    );
+                    if (unsealed) {
+                        this.log.info("Decryption successful.");
+
+                        let plaintext = "";
+                        if (!mail.forward) {
+                            plaintext = XUtils.encodeUTF8(unsealed);
+                        }
+
+                        // emit the message
+                        const fwdMsg1 = mail.forward
+                            ? messageSchema.parse(msgpack.decode(unsealed))
+                            : null;
+                        const message: Message = fwdMsg1
+                            ? { ...fwdMsg1, forward: true }
+                            : {
+                                  authorID: mail.authorID,
+                                  decrypted: true,
+                                  direction: "incoming",
+                                  forward: mail.forward,
+                                  group: mail.group
+                                      ? uuid.stringify(mail.group)
+                                      : null,
+                                  mailID: mail.mailID,
+                                  message: plaintext,
+                                  nonce: XUtils.encodeHex(
+                                      new Uint8Array(mail.nonce),
+                                  ),
+                                  readerID: mail.readerID,
+                                  recipient: mail.recipient,
+                                  sender: mail.sender,
+                                  timestamp: timestamp,
+                              };
+
+                        this.emitter.emit("message", message);
+
+                        // discard onetimekey
+                        await this.database.deleteOneTimeKey(preKeyIndex);
+
+                        const deviceEntry = await this.getDeviceByID(
+                            mail.sender,
+                        );
+                        if (!deviceEntry) {
+                            throw new Error("Couldn't get device entry.");
+                        }
+                        const [userEntry, _userErr] = await this.fetchUser(
+                            deviceEntry.owner,
+                        );
+                        if (!userEntry) {
+                            throw new Error("Couldn't get user entry.");
+                        }
+
+                        this.userRecords[userEntry.userID] = userEntry;
+                        this.deviceRecords[deviceEntry.deviceID] = deviceEntry;
+
+                        // save session
+                        const newSession: SessionSQL = {
+                            deviceID: mail.sender,
+                            fingerprint: XUtils.encodeHex(AD),
+                            lastUsed: new Date().toISOString(),
+                            mode: "receiver",
+                            publicKey: XUtils.encodeHex(PK),
+                            sessionID: uuid.v4(),
+                            SK: XUtils.encodeHex(SK),
+                            userID: userEntry.userID,
+                            verified: false,
+                        };
+                        await this.database.saveSession(newSession);
+
+                        const [user] = await this.fetchUser(newSession.userID);
+
+                        if (user) {
+                            this.emitter.emit("session", newSession, user);
+                        } else {
+                            this.log.warn(
+                                "Couldn't retrieve user " + newSession.userID,
+                            );
+                        }
+                    } else {
+                        this.log.warn("Mail decryption failed.");
+                    }
+                    break;
+                case MailType.subsequent:
+                    const publicKey = Client.deserializeExtra(
+                        mail.mailType,
+                        new Uint8Array(mail.extra),
+                    )[0];
+                    if (!publicKey) {
+                        throw new Error(
+                            "Malformed subsequent mail extra: missing publicKey",
+                        );
+                    }
+                    let session = await this.getSessionByPubkey(publicKey);
+                    let retries = 0;
+                    while (!session) {
+                        if (retries > 3) {
+                            break;
+                        }
+
+                        session = await this.getSessionByPubkey(publicKey);
+                        retries++;
+                        return;
+                    }
+
+                    if (!session) {
+                        this.log.warn(
+                            "Couldn't find session public key " +
+                                XUtils.encodeHex(publicKey),
+                        );
+                        void healSession();
+                        return;
+                    }
+                    this.log.info("Session found for " + mail.sender);
+                    this.log.info(
+                        "Mail nonce " +
+                            XUtils.encodeHex(new Uint8Array(mail.nonce)),
+                    );
+
+                    const HMAC = xHMAC(mail, session.SK);
+                    this.log.info("Mail hash: " + JSON.stringify(mail));
+                    this.log.info("Calculated hmac: " + XUtils.encodeHex(HMAC));
+
+                    if (!XUtils.bytesEqual(HMAC, header)) {
+                        this.log.warn(
+                            "Message authentication failed (HMAC does not match).",
+                        );
+                        void healSession();
+                        return;
+                    }
+
+                    const decrypted = xSecretboxOpen(
+                        new Uint8Array(mail.cipher),
+                        new Uint8Array(mail.nonce),
+                        session.SK,
+                    );
+
+                    if (decrypted) {
+                        this.log.info("Decryption successful.");
+                        // emit the message
+                        const fwdMsg2 = mail.forward
+                            ? messageSchema.parse(msgpack.decode(decrypted))
+                            : null;
+                        const message: Message = fwdMsg2
+                            ? {
+                                  ...fwdMsg2,
+                                  forward: true,
+                              }
+                            : {
+                                  authorID: mail.authorID,
+                                  decrypted: true,
+                                  direction: "incoming",
+                                  forward: mail.forward,
+                                  group: mail.group
+                                      ? uuid.stringify(mail.group)
+                                      : null,
+                                  mailID: mail.mailID,
+                                  message: XUtils.encodeUTF8(decrypted),
+                                  nonce: XUtils.encodeHex(
+                                      new Uint8Array(mail.nonce),
+                                  ),
+                                  readerID: mail.readerID,
+                                  recipient: mail.recipient,
+                                  sender: mail.sender,
+                                  timestamp: timestamp,
+                              };
+                        this.emitter.emit("message", message);
+
+                        void this.database.markSessionUsed(session.sessionID);
+                    } else {
+                        this.log.info("Decryption failed.");
+                        void healSession();
+
+                        // emit the message
+                        const message: Message = {
+                            authorID: mail.authorID,
+                            decrypted: false,
+                            direction: "incoming",
+                            forward: mail.forward,
+                            group: mail.group
+                                ? uuid.stringify(mail.group)
+                                : null,
+                            mailID: mail.mailID,
+                            message: "",
+                            nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
+                            readerID: mail.readerID,
+                            recipient: mail.recipient,
+                            sender: mail.sender,
+                            timestamp: timestamp,
+                        };
+                        this.emitter.emit("message", message);
+                    }
+                    break;
+                default:
+                    this.log.warn("Unsupported MailType:", mail.mailType);
+                    break;
+            }
+        } finally {
+            this.reading = false;
+        }
+    }
+
+    private async redeemInvite(inviteID: string): Promise<Permission> {
+        const res = await this.http.patch(
+            this.getHost() + "/invite/" + inviteID,
+        );
+        return decodeAxios(PermissionCodec, res.data);
+    }
+
+    private async registerDevice(): Promise<Device | null> {
+        while (!this.xKeyRing) {
+            await sleep(100);
+        }
+
+        const token = await this.getToken("device");
+
+        const username = this.user?.username;
+        if (!username) {
+            throw new Error("No user set — log in first.");
+        }
+        const [userDetails, err] = await this.fetchUser(username);
+        if (!userDetails) {
+            throw new Error("Username not found " + username);
+        }
+        if (err) {
+            throw err;
+        }
+        if (!token) {
+            throw new Error("Couldn't fetch token.");
+        }
+
+        const signKey = this.getKeys().public;
+        const signed = XUtils.encodeHex(
+            xSign(
+                Uint8Array.from(uuid.parse(token.key)),
+                this.signKeys.secretKey,
+            ),
+        );
+
+        const devPreKeyIndex = this.xKeyRing.preKeys.index;
+        const devMsg: DevicePayload = {
+            deviceName: this.options?.deviceName ?? "unknown",
+            preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
+            preKeyIndex: devPreKeyIndex,
+            preKeySignature: XUtils.encodeHex(this.xKeyRing.preKeys.signature),
+            signed,
+            signKey,
+            username: userDetails.username,
+        };
+
+        const res = await this.http.post(
+            this.prefixes.HTTP +
+                this.host +
+                "/user/" +
+                userDetails.userID +
+                "/devices",
+            msgpack.encode(devMsg),
+            { headers: { "Content-Type": "application/msgpack" } },
+        );
+        return decodeAxios(DeviceCodec, res.data);
+    }
+
+    private respond(msg: ChallMsg) {
+        const response: RespMsg = {
+            signed: xSign(
+                new Uint8Array(msg.challenge),
+                this.signKeys.secretKey,
+            ),
+            transmissionID: msg.transmissionID,
+            type: "response",
+        };
+        void this.send(response);
+    }
+
+    private async retrieveEmojiByID(emojiID: string): Promise<Emoji | null> {
+        const res = await this.http.get(
+            this.getHost() + "/emoji/" + emojiID + "/details",
+        );
+        if (!res.data) {
+            return null;
+        }
+        return decodeAxios(EmojiCodec, res.data);
+    }
+
+    private async retrieveEmojiList(serverID: string): Promise<Emoji[]> {
+        const res = await this.http.get(
+            this.getHost() + "/server/" + serverID + "/emoji",
+        );
+        return decodeAxios(EmojiArrayCodec, res.data);
+    }
+
+    private async retrieveFile(
+        fileID: string,
+        key: string,
+    ): Promise<FileResponse | null> {
+        const detailsRes = await this.http.get(
+            this.getHost() + "/file/" + fileID + "/details",
+        );
+        const details = decodeAxios(FileSQLCodec, detailsRes.data);
+
+        const res = await this.http.get<ArrayBuffer>(
+            this.getHost() + "/file/" + fileID,
+            {
+                onDownloadProgress: (progressEvent) => {
+                    const percentCompleted = Math.round(
+                        (progressEvent.loaded * 100) /
+                            (progressEvent.total ?? 1),
+                    );
+                    const { loaded, total = 0 } = progressEvent;
+                    const progress: FileProgress = {
+                        direction: "download",
+                        loaded,
+                        progress: percentCompleted,
+                        token: fileID,
+                        total,
+                    };
+                    this.emitter.emit("fileProgress", progress);
+                },
+            },
+        );
+        const fileData = res.data;
+
+        const decrypted = xSecretboxOpen(
+            new Uint8Array(fileData),
+            XUtils.decodeHex(details.nonce),
+            XUtils.decodeHex(key),
+        );
+
+        if (decrypted) {
+            return {
+                data: new Uint8Array(decrypted),
+                details,
+            };
+        }
+        throw new Error("Decryption failed.");
+    }
+
+    private async retrieveInvites(serverID: string): Promise<Invite[]> {
+        const res = await this.http.get(
+            this.getHost() + "/server/" + serverID + "/invites",
+        );
+        return decodeAxios(InviteArrayCodec, res.data);
+    }
+
+    private async retrieveKeyBundle(deviceID: string): Promise<KeyBundle> {
+        const res = await this.http.post(
+            this.getHost() + "/device/" + deviceID + "/keyBundle",
+        );
+        return decodeAxios(KeyBundleCodec, res.data);
+    }
+
+    private async retrieveOrCreateDevice(): Promise<Device> {
+        let device: Device;
+        try {
+            const res = await this.http.get(
                 this.prefixes.HTTP +
                     this.host +
                     "/device/" +
                     XUtils.encodeHex(this.signKeys.publicKey),
             );
-            device = msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            this.log.error(err.toString());
-            if (err.response?.status === 404) {
+            device = decodeAxios(DeviceCodec, res.data);
+        } catch (err: unknown) {
+            this.log.error(err instanceof Error ? err.message : String(err));
+            if (isAxiosError(err) && err.response?.status === 404) {
                 // just in case
                 await this.database.purgeKeyData();
                 await this.populateKeyRing();
@@ -1598,398 +2916,22 @@ export class Client extends EventEmitter {
         return device;
     }
 
-    private async registerDevice(): Promise<IDevice | null> {
-        while (!this.xKeyRing) {
-            await sleep(100);
+    /* header is 32 bytes and is either empty
+    or contains an HMAC of the message with
+    a derived SK */
+    private async send(msg: ClientMessage, header?: Uint8Array) {
+        let i = 0;
+        while (this.socket.readyState !== 1) {
+            await sleep(i);
+            i *= 2;
         }
 
-        const token = await this.getToken("device");
-
-        const [userDetails, err] = await this.retrieveUserDBEntry(
-            this.user!.username,
+        this.log.debug(
+            "OUTH " + XUtils.encodeHex(header || XUtils.emptyHeader()),
         );
-        if (!userDetails) {
-            throw new Error("Username not found " + this.user!.username);
-        }
-        if (err) {
-            throw err;
-        }
-        if (!token) {
-            throw new Error("Couldn't fetch token.");
-        }
+        this.log.debug("OUT " + JSON.stringify(msg, null, 4));
 
-        const signKey = this.getKeys().public;
-        const signed = XUtils.encodeHex(
-            nacl.sign(
-                Uint8Array.from(uuid.parse(token.key)),
-                this.signKeys.secretKey,
-            ),
-        );
-
-        const devMsg: IDevicePayload = {
-            username: userDetails.username,
-            signKey,
-            signed,
-            preKey: XUtils.encodeHex(this.xKeyRing.preKeys.keyPair.publicKey),
-            preKeySignature: XUtils.encodeHex(this.xKeyRing.preKeys.signature),
-            preKeyIndex: this.xKeyRing.preKeys.index!,
-            deviceName: this.options?.deviceName ?? "unknown",
-        };
-
-        try {
-            const res = await this.ax.post(
-                this.prefixes.HTTP +
-                    this.host +
-                    "/user/" +
-                    userDetails.userID +
-                    "/devices",
-                msgpack.encode(devMsg),
-                { headers: { "Content-Type": "application/msgpack" } },
-            );
-            return msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            throw err;
-        }
-    }
-
-    private async getToken(
-        type:
-            | "register"
-            | "file"
-            | "avatar"
-            | "device"
-            | "invite"
-            | "emoji"
-            | "connect",
-    ): Promise<IActionToken | null> {
-        try {
-            const res = await this.ax.get(this.getHost() + "/token/" + type, {
-                responseType: "arraybuffer",
-            });
-            return msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            this.log.warn(err.toString());
-            return null;
-        }
-    }
-
-    private async uploadAvatar(avatar: Uint8Array): Promise<void> {
-        if (typeof FormData !== "undefined") {
-            const fpayload = new FormData();
-            fpayload.set("avatar", new Blob([new Uint8Array(avatar)]));
-
-            await this.ax.post(
-                this.prefixes.HTTP +
-                    this.host +
-                    "/avatar/" +
-                    this.me.user().userID,
-                fpayload,
-                {
-                    headers: { "Content-Type": "multipart/form-data" },
-                    onUploadProgress: (progressEvent) => {
-                        const percentCompleted = Math.round(
-                            (progressEvent.loaded * 100) /
-                                (progressEvent.total ?? 1),
-                        );
-                        const { loaded, total = 0 } = progressEvent;
-                        const progress: IFileProgress = {
-                            direction: "upload",
-                            token: this.getUser().userID,
-                            progress: percentCompleted,
-                            loaded,
-                            total,
-                        };
-                        this.emit("fileProgress", progress);
-                    },
-                },
-            );
-            return;
-        }
-
-        const payload: { file: string } = {
-            file: XUtils.encodeBase64(avatar),
-        };
-        await this.ax.post(
-            this.prefixes.HTTP +
-                this.host +
-                "/avatar/" +
-                this.me.user().userID +
-                "/json",
-            msgpack.encode(payload),
-            { headers: { "Content-Type": "application/msgpack" } },
-        );
-    }
-
-    /**
-     * Gets a list of permissions for a server.
-     *
-     * @returns - The list of IPermissions objects.
-     */
-    private async fetchPermissionList(
-        serverID: string,
-    ): Promise<IPermission[]> {
-        const res = await this.ax.get(
-            this.prefixes.HTTP +
-                this.host +
-                "/server/" +
-                serverID +
-                "/permissions",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    /**
-     * Gets all permissions for the logged in user.
-     *
-     * @returns - The list of IPermissions objects.
-     */
-    private async getPermissions(): Promise<IPermission[]> {
-        const res = await this.ax.get(
-            this.getHost() + "/user/" + this.getUser().userID + "/permissions",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async deletePermission(permissionID: string): Promise<void> {
-        await this.ax.delete(this.getHost() + "/permission/" + permissionID);
-    }
-
-    private async retrieveFile(
-        fileID: string,
-        key: string,
-    ): Promise<IFileResponse | null> {
-        try {
-            const detailsRes = await this.ax.get(
-                this.getHost() + "/file/" + fileID + "/details",
-            );
-            const details = msgpack.decode(new Uint8Array(detailsRes.data));
-
-            const res = await this.ax.get(this.getHost() + "/file/" + fileID, {
-                onDownloadProgress: (progressEvent) => {
-                    const percentCompleted = Math.round(
-                        (progressEvent.loaded * 100) /
-                            (progressEvent.total ?? 1),
-                    );
-                    const { loaded, total = 0 } = progressEvent;
-                    const progress: IFileProgress = {
-                        direction: "download",
-                        token: fileID,
-                        progress: percentCompleted,
-                        loaded,
-                        total,
-                    };
-                    this.emit("fileProgress", progress);
-                },
-            });
-            const fileData = res.data;
-
-            const decrypted = nacl.secretbox.open(
-                new Uint8Array(fileData),
-                XUtils.decodeHex(details.nonce),
-                XUtils.decodeHex(key),
-            );
-
-            if (decrypted) {
-                const resp: IFileResponse = {
-                    details,
-                    data: new Uint8Array(decrypted),
-                };
-                return resp;
-            }
-            throw new Error("Decryption failed.");
-        } catch (err) {
-            throw err;
-        }
-    }
-
-    private async deleteServer(serverID: string): Promise<void> {
-        await this.ax.delete(this.getHost() + "/server/" + serverID);
-    }
-
-    /**
-     * Initializes the keyring. This must be called before anything else.
-     */
-    private async init(): Promise<void> {
-        if (this.hasInit) {
-            throw new Error("You should only call init() once.");
-        }
-        this.hasInit = true;
-
-        await this.populateKeyRing();
-        this.on("message", async (message) => {
-            if (message.direction === "outgoing" && !message.forward) {
-                this.forward(message);
-            }
-
-            if (
-                message.direction === "incoming" &&
-                message.recipient === message.sender
-            ) {
-                return;
-            }
-            await this.database.saveMessage(message);
-        });
-        this.emit("ready");
-    }
-
-    private async deleteChannel(channelID: string): Promise<void> {
-        await this.ax.delete(this.getHost() + "/channel/" + channelID);
-    }
-
-    // returns the file details and the encryption key
-    private async createFile(file: Uint8Array): Promise<[IFileSQL, string]> {
-        this.log.info("Creating file, size: " + formatBytes(file.byteLength));
-
-        const nonce = xMakeNonce();
-        const key = nacl.box.keyPair();
-        const box = nacl.secretbox(Uint8Array.from(file), nonce, key.secretKey);
-
-        this.log.info("Encrypted size: " + formatBytes(box.byteLength));
-
-        if (typeof FormData !== "undefined") {
-            const fpayload = new FormData();
-            fpayload.set("owner", this.getDevice().deviceID);
-            fpayload.set("nonce", XUtils.encodeHex(nonce));
-            fpayload.set("file", new Blob([new Uint8Array(box)]));
-
-            const fres = await this.ax.post(
-                this.getHost() + "/file",
-                fpayload,
-                {
-                    headers: { "Content-Type": "multipart/form-data" },
-                    onUploadProgress: (progressEvent) => {
-                        const percentCompleted = Math.round(
-                            (progressEvent.loaded * 100) /
-                                (progressEvent.total ?? 1),
-                        );
-                        const { loaded, total = 0 } = progressEvent;
-                        const progress: IFileProgress = {
-                            direction: "upload",
-                            token: XUtils.encodeHex(nonce),
-                            progress: percentCompleted,
-                            loaded,
-                            total,
-                        };
-                        this.emit("fileProgress", progress);
-                    },
-                },
-            );
-            const fcreatedFile: IFileSQL = msgpack.decode(
-                new Uint8Array(fres.data),
-            );
-
-            return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
-        }
-
-        const payload: {
-            owner: string;
-            nonce: string;
-            file: string;
-        } = {
-            owner: this.getDevice().deviceID,
-            nonce: XUtils.encodeHex(nonce),
-            file: XUtils.encodeBase64(box),
-        };
-        const res = await this.ax.post(
-            this.getHost() + "/file/json",
-            msgpack.encode(payload),
-            { headers: { "Content-Type": "application/msgpack" } },
-        );
-        const createdFile: IFileSQL = msgpack.decode(new Uint8Array(res.data));
-
-        return [createdFile, XUtils.encodeHex(key.secretKey)];
-    }
-
-    private async getUserList(channelID: string): Promise<IUser[]> {
-        const res = await this.ax.post(
-            this.getHost() + "/userList/" + channelID,
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async markSessionVerified(sessionID: string) {
-        return this.database.markSessionVerified(sessionID);
-    }
-
-    private async getGroupHistory(channelID: string): Promise<IMessage[]> {
-        const messages: IMessage[] =
-            await this.database.getGroupHistory(channelID);
-
-        return messages;
-    }
-
-    private async deleteHistory(
-        channelOrUserID: string,
-        olderThan?: string,
-    ): Promise<void> {
-        await this.database.deleteHistory(channelOrUserID, olderThan);
-    }
-
-    private async purgeHistory(): Promise<void> {
-        await this.database.purgeHistory();
-    }
-
-    private async getMessageHistory(userID: string): Promise<IMessage[]> {
-        const messages: IMessage[] =
-            await this.database.getMessageHistory(userID);
-
-        return messages;
-    }
-
-    private async sendMessage(userID: string, message: string): Promise<void> {
-        try {
-            const [userEntry, err] = await this.retrieveUserDBEntry(userID);
-            if (err) {
-                throw err;
-            }
-            if (!userEntry) {
-                throw new Error("Couldn't get user entry.");
-            }
-
-            let deviceList = await this.getUserDeviceList(userID);
-            if (!deviceList) {
-                let retries = 0;
-                while (!deviceList) {
-                    deviceList = await this.getUserDeviceList(userID);
-                    retries++;
-                    if (retries > 3) {
-                        throw new Error("Couldn't get device list.");
-                    }
-                }
-            }
-            const mailID = uuid.v4();
-            const promises: Array<Promise<any>> = [];
-            for (const device of deviceList) {
-                promises.push(
-                    this.sendMail(
-                        device,
-                        userEntry,
-                        XUtils.decodeUTF8(message),
-                        null,
-                        mailID,
-                        false,
-                    ),
-                );
-            }
-            Promise.allSettled(promises).then((results) => {
-                for (const result of results) {
-                    const { status } = result;
-                    if (status === "rejected") {
-                        this.log.warn("Message failed.");
-                        this.log.warn(JSON.stringify(result));
-                    }
-                }
-            });
-        } catch (err) {
-            this.log.error(
-                "Message " + (err.message?.mailID || "") + " threw exception.",
-            );
-            this.log.error(err.toString());
-            if (err.message?.mailID) {
-                await this.database.deleteMessage(err.message.mailID);
-            }
-            throw err;
-        }
+        this.socket.send(XUtils.packMessage(msg, header));
     }
 
     private async sendGroupMessage(
@@ -2016,10 +2958,20 @@ export class Client extends EventEmitter {
         );
 
         for (const device of devices) {
+            const ownerRecord = this.userRecords[device.owner];
+            if (!ownerRecord) {
+                this.log.warn(
+                    "Skipping device " +
+                        device.deviceID +
+                        ": no user record for owner " +
+                        device.owner,
+                );
+                continue;
+            }
             promises.push(
                 this.sendMail(
                     device,
-                    this.userRecords[device.owner],
+                    ownerRecord,
                     XUtils.decodeUTF8(message),
                     uuidToUint8(channelID),
                     mailID,
@@ -2027,62 +2979,7 @@ export class Client extends EventEmitter {
                 ),
             );
         }
-        Promise.allSettled(promises).then((results) => {
-            for (const result of results) {
-                const { status } = result;
-                if (status === "rejected") {
-                    this.log.warn("Message failed.");
-                    this.log.warn(JSON.stringify(result));
-                }
-            }
-        });
-    }
-
-    private async createServer(name: string): Promise<IServer> {
-        const res = await this.ax.post(
-            this.getHost() + "/server/" + globalThis.btoa(name),
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async forward(message: IMessage) {
-        const copy = { ...message };
-
-        if (this.forwarded.includes(copy.mailID)) {
-            return;
-        }
-        this.forwarded.push(copy.mailID);
-        if (this.forwarded.length > 1000) {
-            this.forwarded.shift();
-        }
-
-        const msgBytes = Uint8Array.from(msgpack.encode(copy));
-
-        const devices = await this.getUserDeviceList(this.getUser().userID);
-        this.log.info(
-            "Forwarding to my other devices, deviceList length is " +
-                devices?.length,
-        );
-
-        if (!devices) {
-            throw new Error("Couldn't get own devices.");
-        }
-        const promises = [];
-        for (const device of devices) {
-            if (device.deviceID !== this.getDevice().deviceID) {
-                promises.push(
-                    this.sendMail(
-                        device,
-                        this.getUser(),
-                        msgBytes,
-                        null,
-                        copy.mailID,
-                        true,
-                    ),
-                );
-            }
-        }
-        Promise.allSettled(promises).then((results) => {
+        void Promise.allSettled(promises).then((results) => {
             for (const result of results) {
                 const { status } = result;
                 if (status === "rejected") {
@@ -2095,15 +2992,15 @@ export class Client extends EventEmitter {
 
     /* Sends encrypted mail to a user. */
     private async sendMail(
-        device: IDevice,
-        user: IUser,
+        device: Device,
+        user: User,
         msg: Uint8Array,
-        group: Uint8Array | null,
-        mailID: string | null,
+        group: null | Uint8Array,
+        mailID: null | string,
         forward: boolean,
         retry = false,
     ): Promise<void> {
-        while (this.sending[device.deviceID] !== undefined) {
+        while (this.sending.has(device.deviceID)) {
             this.log.warn(
                 "Sending in progress to device ID " +
                     device.deviceID +
@@ -2118,7 +3015,7 @@ export class Client extends EventEmitter {
             "Sending mail to device:\n " +
                 JSON.stringify(device.deviceID, null, 4),
         );
-        this.sending[device.deviceID] = device;
+        this.sending.set(device.deviceID, device);
 
         const session = await this.database.getSessionByDeviceID(
             device.deviceID,
@@ -2133,1073 +3030,150 @@ export class Client extends EventEmitter {
         }
 
         const nonce = xMakeNonce();
-        const cipher = nacl.secretbox(msg, nonce, session.SK);
+        const cipher = xSecretbox(msg, nonce, session.SK);
         const extra = session.publicKey;
 
-        const mail: IMailWS = {
-            mailType: MailType.subsequent,
-            mailID: mailID || uuid.v4(),
-            recipient: device.deviceID,
-            cipher,
-            nonce,
-            extra,
-            sender: this.getDevice().deviceID,
-            group,
-            forward,
+        const mail: MailWS = {
             authorID: this.getUser().userID,
+            cipher,
+            extra,
+            forward,
+            group,
+            mailID: mailID || uuid.v4(),
+            mailType: MailType.subsequent,
+            nonce,
             readerID: session.userID,
+            recipient: device.deviceID,
+            sender: this.getDevice().deviceID,
         };
 
-        const msgb: IResourceMsg = {
-            transmissionID: uuid.v4(),
-            type: "resource",
-            resourceType: "mail",
+        const msgb: ResourceMsg = {
             action: "CREATE",
             data: mail,
+            resourceType: "mail",
+            transmissionID: uuid.v4(),
+            type: "resource",
         };
 
         const hmac = xHMAC(mail, session.SK);
-        this.log.info("Mail hash: " + objectHash(mail));
+        this.log.info("Mail hash: " + JSON.stringify(mail));
         this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
 
-        const outMsg: IMessage = forward
-            ? { ...msgpack.decode(msg), forward: true }
+        const fwdOut = forward
+            ? messageSchema.parse(msgpack.decode(msg))
+            : null;
+        const outMsg: Message = fwdOut
+            ? { ...fwdOut, forward: true }
             : {
+                  authorID: mail.authorID,
+                  decrypted: true,
+                  direction: "outgoing",
+                  forward: mail.forward,
+                  group: mail.group ? uuid.stringify(mail.group) : null,
                   mailID: mail.mailID,
-                  sender: mail.sender,
-                  recipient: mail.recipient,
-                  nonce: XUtils.encodeHex(mail.nonce),
                   message: XUtils.encodeUTF8(msg),
-                  direction: "outgoing",
-                  timestamp: new Date(Date.now()),
-                  decrypted: true,
-                  group: mail.group ? uuid.stringify(mail.group) : null,
-                  forward: mail.forward,
-                  authorID: mail.authorID,
+                  nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
                   readerID: mail.readerID,
-              };
-        this.emit("message", outMsg);
-
-        await new Promise((res, rej) => {
-            const callback = async (packedMsg: Uint8Array) => {
-                const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
-                if (receivedMsg.transmissionID === msgb.transmissionID) {
-                    this.conn.off("message", callback);
-                    if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISucessMsg).data);
-                    } else {
-                        rej({
-                            error: receivedMsg,
-                            message: outMsg,
-                        });
-                    }
-                }
-            };
-            this.conn.on("message", callback);
-            this.send(msgb, hmac);
-        });
-        delete this.sending[device.deviceID];
-    }
-
-    private async getSessionList() {
-        return this.database.getAllSessions();
-    }
-
-    private async getServerList(): Promise<IServer[]> {
-        const res = await this.ax.get(
-            this.getHost() + "/user/" + this.getUser().userID + "/servers",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async createChannel(
-        name: string,
-        serverID: string,
-    ): Promise<IChannel> {
-        const body = { name };
-        const res = await this.ax.post(
-            this.getHost() + "/server/" + serverID + "/channels",
-            msgpack.encode(body),
-            { headers: { "Content-Type": "application/msgpack" } },
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async getDeviceByID(deviceID: string): Promise<IDevice | null> {
-        if (this.deviceRecords[deviceID]) {
-            this.log.info("Found device in local cache.");
-            return this.deviceRecords[deviceID];
-        }
-
-        const device = await this.database.getDevice(deviceID);
-        if (device) {
-            this.log.info("Found device in local db.");
-            this.deviceRecords[deviceID] = device;
-            return device;
-        }
-        try {
-            const res = await this.ax.get(
-                this.getHost() + "/device/" + deviceID,
-            );
-            this.log.info("Retrieved device from server.");
-            const fetchedDevice = msgpack.decode(new Uint8Array(res.data));
-            this.deviceRecords[deviceID] = fetchedDevice;
-            await this.database.saveDevice(fetchedDevice);
-            return fetchedDevice;
-        } catch (err) {
-            return null;
-        }
-    }
-
-    private async deleteDevice(deviceID: string): Promise<void> {
-        if (deviceID === this.getDevice().deviceID) {
-            throw new Error("You can't delete the device you're logged in to.");
-        }
-        await this.ax.delete(
-            this.prefixes.HTTP +
-                this.host +
-                "/user/" +
-                this.getUser().userID +
-                "/devices/" +
-                deviceID,
-        );
-    }
-
-    private async getMultiUserDeviceList(
-        userIDs: string[],
-    ): Promise<IDevice[]> {
-        try {
-            const res = await this.ax.post(
-                this.getHost() + "/deviceList",
-                msgpack.encode(userIDs),
-                { headers: { "Content-Type": "application/msgpack" } },
-            );
-            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
-            for (const device of devices) {
-                this.deviceRecords[device.deviceID] = device;
-            }
-
-            return devices;
-        } catch (err) {
-            return [];
-        }
-    }
-
-    private async getUserDeviceList(userID: string): Promise<IDevice[] | null> {
-        try {
-            const res = await this.ax.get(
-                this.getHost() + "/user/" + userID + "/devices",
-            );
-            const devices: IDevice[] = msgpack.decode(new Uint8Array(res.data));
-            for (const device of devices) {
-                this.deviceRecords[device.deviceID] = device;
-            }
-
-            return devices;
-        } catch (err) {
-            return null;
-        }
-    }
-
-    private async getServerByID(serverID: string): Promise<IServer | null> {
-        try {
-            const res = await this.ax.get(
-                this.getHost() + "/server/" + serverID,
-            );
-            return msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            return null;
-        }
-    }
-
-    private async getChannelByID(channelID: string): Promise<IChannel | null> {
-        try {
-            const res = await this.ax.get(
-                this.getHost() + "/channel/" + channelID,
-            );
-            return msgpack.decode(new Uint8Array(res.data));
-        } catch (err) {
-            return null;
-        }
-    }
-
-    private async getChannelList(serverID: string): Promise<IChannel[]> {
-        const res = await this.ax.get(
-            this.getHost() + "/server/" + serverID + "/channels",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    /* Get the currently logged in user. You cannot call this until 
-    after the auth event is emitted. */
-    private getUser(): IUser {
-        if (!this.user) {
-            throw new Error(
-                "You must wait until the auth event is emitted before fetching user details.",
-            );
-        }
-        return this.user;
-    }
-
-    private getDevice(): IDevice {
-        if (!this.device) {
-            throw new Error(
-                "You must wait until the auth event is emitted before fetching device details.",
-            );
-        }
-        return this.device;
-    }
-
-    private setUser(user: IUser): void {
-        this.user = user;
-    }
-
-    /* Retrieves the userID with the user identifier.
-    user identifier is checked for userID, then signkey,
-    and finally falls back to username. */
-    private async retrieveUserDBEntry(
-        userIdentifier: string,
-    ): Promise<[IUser | null, AxiosError | null]> {
-        if (this.userRecords[userIdentifier]) {
-            return [this.userRecords[userIdentifier], null];
-        }
-
-        try {
-            const res = await this.ax.get(
-                this.getHost() + "/user/" + userIdentifier,
-            );
-            const userRecord = msgpack.decode(new Uint8Array(res.data));
-            this.userRecords[userIdentifier] = userRecord;
-            return [userRecord, null];
-        } catch (err) {
-            return [null, err];
-        }
-    }
-
-    /* Retrieves the current list of users you have sessions with. */
-    private async getFamiliars(): Promise<IUser[]> {
-        const sessions = await this.database.getAllSessions();
-        const familiars: IUser[] = [];
-
-        for (const session of sessions) {
-            const [user, err] = await this.retrieveUserDBEntry(session.userID);
-            if (user) {
-                familiars.push(user);
-            }
-        }
-
-        return familiars;
-    }
-
-    private async createSession(
-        device: IDevice,
-        user: IUser,
-        message: Uint8Array,
-        group: Uint8Array | null,
-        /* this is passed through if the first message is 
-        part of a group message */
-        mailID: string | null,
-        forward: boolean,
-    ): Promise<void> {
-        let keyBundle: IKeyBundle;
-
-        this.log.info(
-            "Requesting key bundle for device: " +
-                JSON.stringify(device, null, 4),
-        );
-        try {
-            keyBundle = await this.retrieveKeyBundle(device.deviceID);
-        } catch (err) {
-            this.log.warn("Couldn't get key bundle:", err);
-            return;
-        }
-
-        this.log.warn(
-            this.toString() +
-                " retrieved keybundle #" +
-                keyBundle.otk?.index.toString() +
-                " for " +
-                device.deviceID,
-        );
-
-        // my keys
-        const IK_A = this.xKeyRing!.identityKeys.secretKey;
-        const IK_AP = this.xKeyRing!.identityKeys.publicKey;
-        const EK_A = this.xKeyRing!.ephemeralKeys.secretKey;
-
-        // their keys
-        const IK_B = XKeyConvert.convertPublicKey(keyBundle.signKey)!;
-        const SPK_B = keyBundle.preKey.publicKey;
-        const OPK_B = keyBundle.otk ? keyBundle.otk.publicKey : null;
-
-        // diffie hellman functions
-        const DH1 = xDH(IK_A, SPK_B);
-        const DH2 = xDH(EK_A, IK_B);
-        const DH3 = xDH(EK_A, SPK_B);
-        const DH4 = OPK_B ? xDH(EK_A, OPK_B) : null;
-
-        // initial key material
-        const IKM = DH4 ? xConcat(DH1, DH2, DH3, DH4) : xConcat(DH1, DH2, DH3);
-
-        // one time key index
-        const IDX = keyBundle.otk
-            ? XUtils.numberToUint8Arr(keyBundle.otk.index)
-            : XUtils.numberToUint8Arr(0);
-
-        // shared secret key
-        const SK = xKDF(IKM);
-        this.log.info("Obtained SK, " + XUtils.encodeHex(SK));
-
-        const PK = nacl.box.keyPair.fromSecretKey(SK).publicKey;
-        this.log.info(
-            this.toString() +
-                " Obtained PK for " +
-                device.deviceID +
-                " " +
-                XUtils.encodeHex(PK),
-        );
-
-        const AD = xConcat(
-            xEncode(xConstants.CURVE, IK_AP),
-            xEncode(xConstants.CURVE, IK_B),
-        );
-
-        const nonce = xMakeNonce();
-        const cipher = nacl.secretbox(message, nonce, SK);
-
-        this.log.info("Encrypted ciphertext.");
-
-        /* 32 bytes for signkey, 32 bytes for ephemeral key, 
-        68 bytes for AD, 6 bytes for otk index (empty for no otk) */
-        const extra = xConcat(
-            this.signKeys.publicKey,
-            this.xKeyRing!.ephemeralKeys.publicKey,
-            PK,
-            AD,
-            IDX,
-        );
-
-        const mail: IMailWS = {
-            mailType: MailType.initial,
-            mailID: mailID || uuid.v4(),
-            recipient: device.deviceID,
-            cipher,
-            nonce,
-            extra,
-            sender: this.getDevice().deviceID,
-            group,
-            forward,
-            authorID: this.getUser().userID,
-            readerID: user.userID,
-        };
-
-        const hmac = xHMAC(mail, SK);
-        this.log.info("Mail hash: " + objectHash(mail));
-        this.log.info("Generated hmac: " + XUtils.encodeHex(hmac));
-
-        const msg: IResourceMsg = {
-            transmissionID: uuid.v4(),
-            type: "resource",
-            resourceType: "mail",
-            action: "CREATE",
-            data: mail,
-        };
-
-        // discard the ephemeral keys
-        this.newEphemeralKeys();
-
-        // save the encryption session
-        this.log.info("Saving new session.");
-        const sessionEntry: ISessionSQL = {
-            verified: false,
-            sessionID: uuid.v4(),
-            userID: user.userID,
-            mode: "initiator",
-            SK: XUtils.encodeHex(SK),
-            publicKey: XUtils.encodeHex(PK),
-            lastUsed: new Date(Date.now()),
-            fingerprint: XUtils.encodeHex(AD),
-            deviceID: device.deviceID,
-        };
-
-        await this.database.saveSession(sessionEntry);
-
-        this.emit("session", sessionEntry, user);
-
-        // emit the message
-        const emitMsg: IMessage = forward
-            ? { ...msgpack.decode(message), forward: true }
-            : {
-                  nonce: XUtils.encodeHex(mail.nonce),
-                  mailID: mail.mailID,
-                  sender: mail.sender,
                   recipient: mail.recipient,
-                  message: XUtils.encodeUTF8(message),
-                  direction: "outgoing",
-                  timestamp: new Date(Date.now()),
-                  decrypted: true,
-                  group: mail.group ? uuid.stringify(mail.group) : null,
-                  forward: mail.forward,
-                  authorID: mail.authorID,
-                  readerID: mail.readerID,
+                  sender: mail.sender,
+                  timestamp: new Date().toISOString(),
               };
-        this.emit("message", emitMsg);
+        this.emitter.emit("message", outMsg);
 
-        // send mail and wait for response
         await new Promise((res, rej) => {
             const callback = (packedMsg: Uint8Array) => {
-                const [header, receivedMsg] = XUtils.unpackMessage(packedMsg);
-                if (receivedMsg.transmissionID === msg.transmissionID) {
-                    this.conn.off("message", callback);
-                    if (receivedMsg.type === "success") {
-                        res((receivedMsg as ISucessMsg).data);
+                const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
+                if (receivedMsg.transmissionID === msgb.transmissionID) {
+                    this.socket.off("message", callback);
+                    const parsed = WSMessageSchema.safeParse(receivedMsg);
+                    if (parsed.success && parsed.data.type === "success") {
+                        res(parsed.data.data);
                     } else {
-                        rej({
-                            error: receivedMsg,
-                            message: emitMsg,
-                        });
+                        rej(
+                            new Error(
+                                "Mail delivery failed: " +
+                                    JSON.stringify(receivedMsg),
+                            ),
+                        );
                     }
                 }
             };
-            this.conn.on("message", callback);
-            this.send(msg, hmac);
-            this.log.info("Mail sent.");
+            this.socket.on("message", callback);
+            void this.send(msgb, hmac);
         });
-        delete this.sending[device.deviceID];
+        this.sending.delete(device.deviceID);
+    }
+
+    private async sendMessage(userID: string, message: string): Promise<void> {
+        try {
+            const [userEntry, err] = await this.fetchUser(userID);
+            if (err) {
+                throw err;
+            }
+            if (!userEntry) {
+                throw new Error("Couldn't get user entry.");
+            }
+
+            let deviceList = await this.getUserDeviceList(userID);
+            if (!deviceList) {
+                let retries = 0;
+                while (!deviceList) {
+                    deviceList = await this.getUserDeviceList(userID);
+                    retries++;
+                    if (retries > 3) {
+                        throw new Error("Couldn't get device list.");
+                    }
+                }
+            }
+            const mailID = uuid.v4();
+            const promises: Array<Promise<void>> = [];
+            for (const device of deviceList) {
+                promises.push(
+                    this.sendMail(
+                        device,
+                        userEntry,
+                        XUtils.decodeUTF8(message),
+                        null,
+                        mailID,
+                        false,
+                    ),
+                );
+            }
+            void Promise.allSettled(promises).then((results) => {
+                for (const result of results) {
+                    const { status } = result;
+                    if (status === "rejected") {
+                        this.log.warn("Message failed.");
+                        this.log.warn(JSON.stringify(result));
+                    }
+                }
+            });
+        } catch (err: unknown) {
+            this.log.error("Message threw exception.");
+            this.log.error(err instanceof Error ? err.message : String(err));
+            throw err;
+        }
     }
 
     private sendReceipt(nonce: Uint8Array) {
-        const receipt: IReceiptMsg = {
-            type: "receipt",
-            transmissionID: uuid.v4(),
+        const receipt: ReceiptMsg = {
             nonce,
+            transmissionID: uuid.v4(),
+            type: "receipt",
         };
-        this.send(receipt);
-    }
-
-    private async getSessionByPubkey(publicKey: Uint8Array) {
-        const strPubKey = XUtils.encodeHex(publicKey);
-        if (this.sessionRecords[strPubKey]) {
-            return this.sessionRecords[strPubKey];
-        }
-        const session = await this.database.getSessionByPublicKey(publicKey);
-        if (session) {
-            this.sessionRecords[strPubKey] = session;
-        }
-        return session;
-    }
-
-    private async readMail(
-        header: Uint8Array,
-        mail: IMailWS,
-        timestamp: string,
-    ) {
-        this.sendReceipt(mail.nonce);
-        let timeout = 1;
-        while (this.reading) {
-            await sleep(timeout);
-            timeout *= 2;
-        }
-        this.reading = true;
-
-        try {
-            const healSession = async () => {
-                this.log.info("Requesting retry of " + mail.mailID);
-                const deviceEntry = await this.getDeviceByID(mail.sender);
-                const [user, err] = await this.retrieveUserDBEntry(
-                    mail.authorID,
-                );
-                if (deviceEntry && user) {
-                    this.createSession(
-                        deviceEntry,
-                        user,
-                        XUtils.decodeUTF8(`��RETRY_REQUEST:${mail.mailID}��`),
-                        mail.group,
-                        uuid.v4(),
-                        false,
-                    );
-                }
-            };
-
-            this.log.info("Received mail from " + mail.sender);
-            switch (mail.mailType) {
-                case MailType.subsequent:
-                    const [publicKey] = Client.deserializeExtra(
-                        mail.mailType,
-                        mail.extra,
-                    );
-                    let session = await this.getSessionByPubkey(publicKey);
-                    let retries = 0;
-                    while (!session) {
-                        if (retries > 3) {
-                            break;
-                        }
-
-                        session = await this.getSessionByPubkey(publicKey);
-                        retries++;
-                        return;
-                    }
-
-                    if (!session) {
-                        this.log.warn(
-                            "Couldn't find session public key " +
-                                XUtils.encodeHex(publicKey),
-                        );
-                        healSession();
-                        return;
-                    }
-                    this.log.info("Session found for " + mail.sender);
-                    this.log.info("Mail nonce " + XUtils.encodeHex(mail.nonce));
-
-                    const HMAC = xHMAC(mail, session.SK);
-                    this.log.info("Mail hash: " + objectHash(mail));
-                    this.log.info("Calculated hmac: " + XUtils.encodeHex(HMAC));
-
-                    if (!XUtils.bytesEqual(HMAC, header)) {
-                        this.log.warn(
-                            "Message authentication failed (HMAC does not match).",
-                        );
-                        healSession();
-                        return;
-                    }
-
-                    const decrypted = nacl.secretbox.open(
-                        mail.cipher,
-                        mail.nonce,
-                        session.SK,
-                    );
-
-                    if (decrypted) {
-                        this.log.info("Decryption successful.");
-                        let plaintext = "";
-                        if (!mail.forward) {
-                            plaintext = XUtils.encodeUTF8(decrypted);
-                        }
-                        // emit the message
-                        const message: IMessage = mail.forward
-                            ? {
-                                  ...msgpack.decode(decrypted),
-                                  forward: true,
-                              }
-                            : {
-                                  nonce: XUtils.encodeHex(mail.nonce),
-                                  mailID: mail.mailID,
-                                  sender: mail.sender,
-                                  recipient: mail.recipient,
-                                  message: XUtils.encodeUTF8(decrypted),
-                                  direction: "incoming",
-                                  timestamp: new Date(timestamp),
-                                  decrypted: true,
-                                  group: mail.group
-                                      ? uuid.stringify(mail.group)
-                                      : null,
-                                  forward: mail.forward,
-                                  authorID: mail.authorID,
-                                  readerID: mail.readerID,
-                              };
-                        this.emit("message", message);
-
-                        this.database.markSessionUsed(session.sessionID);
-                    } else {
-                        this.log.info("Decryption failed.");
-                        healSession();
-
-                        // emit the message
-                        const message: IMessage = {
-                            nonce: XUtils.encodeHex(mail.nonce),
-                            mailID: mail.mailID,
-                            sender: mail.sender,
-                            recipient: mail.recipient,
-                            message: "",
-                            direction: "incoming",
-                            timestamp: new Date(timestamp),
-                            decrypted: false,
-                            group: mail.group
-                                ? uuid.stringify(mail.group)
-                                : null,
-                            forward: mail.forward,
-                            authorID: mail.authorID,
-                            readerID: mail.readerID,
-                        };
-                        this.emit("message", message);
-                    }
-                    break;
-                case MailType.initial:
-                    this.log.info("Initiating new session.");
-                    const [signKey, ephKey, assocData, indexBytes] =
-                        Client.deserializeExtra(MailType.initial, mail.extra);
-
-                    const preKeyIndex = XUtils.uint8ArrToNumber(indexBytes);
-
-                    this.log.info(
-                        this.toString() + " otk #" + preKeyIndex + " indicated",
-                    );
-
-                    const otk =
-                        preKeyIndex === 0
-                            ? null
-                            : await this.database.getOneTimeKey(preKeyIndex);
-
-                    if (otk) {
-                        this.log.info(
-                            "otk #" +
-                                JSON.stringify(otk?.index) +
-                                " retrieved from database.",
-                        );
-                    }
-
-                    this.log.info("signKey: " + XUtils.encodeHex(signKey));
-                    this.log.info("preKey: " + XUtils.encodeHex(ephKey));
-                    if (otk) {
-                        this.log.info(
-                            "OTK: " + XUtils.encodeHex(otk.keyPair.publicKey),
-                        );
-                    }
-
-                    if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
-                        this.log.warn(
-                            "OTK index mismatch, received " +
-                                JSON.stringify(otk?.index) +
-                                ", expected " +
-                                preKeyIndex.toString(),
-                        );
-                        return;
-                    }
-
-                    // their public keys
-                    const IK_A = XKeyConvert.convertPublicKey(signKey)!;
-                    const EK_A = ephKey;
-
-                    // my private keys
-                    const IK_B = this.xKeyRing!.identityKeys.secretKey;
-                    const IK_BP = this.xKeyRing!.identityKeys.publicKey;
-                    const SPK_B = this.xKeyRing!.preKeys.keyPair.secretKey;
-                    const OPK_B = otk ? otk.keyPair.secretKey : null;
-
-                    // diffie hellman functions
-                    const DH1 = xDH(SPK_B, IK_A);
-                    const DH2 = xDH(IK_B, EK_A);
-                    const DH3 = xDH(SPK_B, EK_A);
-                    const DH4 = OPK_B ? xDH(OPK_B, EK_A) : null;
-
-                    // initial key material
-                    const IKM = DH4
-                        ? xConcat(DH1, DH2, DH3, DH4)
-                        : xConcat(DH1, DH2, DH3);
-
-                    // shared secret key
-                    const SK = xKDF(IKM);
-                    this.log.info(
-                        "Obtained SK for " +
-                            mail.sender +
-                            ", " +
-                            XUtils.encodeHex(SK),
-                    );
-
-                    // shared public key
-                    const PK = nacl.box.keyPair.fromSecretKey(SK).publicKey;
-                    this.log.info(
-                        this.toString() +
-                            "Obtained PK for " +
-                            mail.sender +
-                            " " +
-                            XUtils.encodeHex(PK),
-                    );
-
-                    const hmac = xHMAC(mail, SK);
-                    this.log.info("Mail hash: " + objectHash(mail));
-                    this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
-
-                    // associated data
-                    const AD = xConcat(
-                        xEncode(xConstants.CURVE, IK_A),
-                        xEncode(xConstants.CURVE, IK_BP),
-                    );
-
-                    if (!XUtils.bytesEqual(hmac, header)) {
-                        console.warn(
-                            "Mail authentication failed (HMAC did not match).",
-                        );
-                        console.warn(mail);
-                        return;
-                    }
-                    this.log.info("Mail authenticated successfully.");
-
-                    const unsealed = nacl.secretbox.open(
-                        mail.cipher,
-                        mail.nonce,
-                        SK,
-                    );
-                    if (unsealed) {
-                        this.log.info("Decryption successful.");
-
-                        let plaintext = "";
-                        if (!mail.forward) {
-                            plaintext = XUtils.encodeUTF8(unsealed);
-                        }
-
-                        // emit the message
-                        const message: IMessage = mail.forward
-                            ? { ...msgpack.decode(unsealed), forward: true }
-                            : {
-                                  nonce: XUtils.encodeHex(mail.nonce),
-                                  mailID: mail.mailID,
-                                  sender: mail.sender,
-                                  recipient: mail.recipient,
-                                  message: plaintext,
-                                  direction: "incoming",
-                                  timestamp: new Date(timestamp),
-                                  decrypted: true,
-                                  group: mail.group
-                                      ? uuid.stringify(mail.group)
-                                      : null,
-                                  forward: mail.forward,
-                                  authorID: mail.authorID,
-                                  readerID: mail.readerID,
-                              };
-
-                        this.emit("message", message);
-
-                        // discard onetimekey
-                        await this.database.deleteOneTimeKey(preKeyIndex);
-
-                        const deviceEntry = await this.getDeviceByID(
-                            mail.sender,
-                        );
-                        if (!deviceEntry) {
-                            throw new Error("Couldn't get device entry.");
-                        }
-                        const [userEntry, userErr] =
-                            await this.retrieveUserDBEntry(deviceEntry.owner);
-                        if (!userEntry) {
-                            throw new Error("Couldn't get user entry.");
-                        }
-
-                        this.userRecords[userEntry.userID] = userEntry;
-                        this.deviceRecords[deviceEntry.deviceID] = deviceEntry;
-
-                        // save session
-                        const newSession: ISessionSQL = {
-                            verified: false,
-                            sessionID: uuid.v4(),
-                            userID: userEntry.userID,
-                            mode: "receiver",
-                            SK: XUtils.encodeHex(SK),
-                            publicKey: XUtils.encodeHex(PK),
-                            lastUsed: new Date(Date.now()),
-                            fingerprint: XUtils.encodeHex(AD),
-                            deviceID: mail.sender,
-                        };
-                        await this.database.saveSession(newSession);
-
-                        let [user, err] = await this.retrieveUserDBEntry(
-                            newSession.userID,
-                        );
-
-                        if (user) {
-                            this.emit("session", newSession, user);
-                        } else {
-                            let failed = 1;
-                            // retry a couple times
-                            while (!user) {
-                                [user, err] = await this.retrieveUserDBEntry(
-                                    newSession.userID,
-                                );
-                                failed++;
-                                if (failed > 3) {
-                                    this.log.warn(
-                                        "Couldn't retrieve user entry.",
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                    } else {
-                        this.log.warn("Mail decryption failed.");
-                    }
-                    break;
-                default:
-                    this.log.warn("Unsupported MailType:", mail.mailType);
-                    break;
-            }
-        } finally {
-            this.reading = false;
-        }
-    }
-
-    private newEphemeralKeys() {
-        this.xKeyRing!.ephemeralKeys = nacl.box.keyPair();
-    }
-
-    private createPreKey() {
-        const preKeyPair = nacl.box.keyPair();
-        const preKeys: IPreKeysCrypto = {
-            keyPair: preKeyPair,
-            signature: nacl.sign(
-                xEncode(xConstants.CURVE, preKeyPair.publicKey),
-                this.signKeys.secretKey,
-            ),
-        };
-        return preKeys;
-    }
-
-    private async handleNotify(msg: INotifyMsg) {
-        switch (msg.event) {
-            case "mail":
-                this.log.info("Server has informed us of new mail.");
-                await this.getMail();
-                this.fetchingMail = false;
-                break;
-            case "permission":
-                this.emit("permission", msg.data as IPermission);
-                break;
-            case "retryRequest":
-                const messageID = msg.data;
-
-                break;
-            default:
-                this.log.info("Unsupported notification event " + msg.event);
-                break;
-        }
-    }
-
-    private async populateKeyRing() {
-        // we've checked in the constructor that these exist
-        const identityKeys = this.idKeys!;
-
-        let preKeys = await this.database.getPreKeys();
-        if (!preKeys) {
-            this.log.warn("No prekeys found in database, creating a new one.");
-            preKeys = this.createPreKey();
-            await this.database.savePreKeys([preKeys], false);
-        }
-
-        const sessions = await this.database.getAllSessions();
-        for (const session of sessions) {
-            this.sessionRecords[session.publicKey] =
-                sqlSessionToCrypto(session);
-        }
-
-        const ephemeralKeys = nacl.box.keyPair();
-
-        this.xKeyRing = {
-            identityKeys,
-            preKeys,
-            ephemeralKeys,
-        };
-
-        this.log.info(
-            "Keyring populated:\n" +
-                JSON.stringify(
-                    {
-                        signKey: XUtils.encodeHex(this.signKeys.publicKey),
-                        preKey: XUtils.encodeHex(preKeys.keyPair.publicKey),
-                        ephemeralKey: XUtils.encodeHex(ephemeralKeys.publicKey),
-                    },
-                    null,
-                    4,
-                ),
-        );
-    }
-
-    private initSocket() {
-        try {
-            if (!this.token) {
-                throw new Error("No token found, did you call login()?");
-            }
-
-            const wsUrl = this.prefixes.WS + this.host + "/socket";
-            // Auth sent as first message after open
-            this.conn = new this.adapters.WebSocket(wsUrl);
-            this.conn.on("open", () => {
-                this.log.info("Connection opened.");
-                // Send auth as first message before anything else.
-                this.conn.send(
-                    JSON.stringify({ type: "auth", token: this.token }),
-                );
-                this.pingInterval = setInterval(this.ping.bind(this), 15000);
-            });
-
-            this.conn.on("close", () => {
-                this.log.info("Connection closed.");
-                if (this.pingInterval) {
-                    clearInterval(this.pingInterval);
-                    this.pingInterval = null;
-                }
-                if (!this.manuallyClosing) {
-                    this.emit("disconnect");
-                }
-            });
-
-            this.conn.on("error", (error) => {
-                throw error;
-            });
-
-            this.conn.on("message", async (message: Uint8Array) => {
-                const [header, msg] = XUtils.unpackMessage(message);
-
-                this.log.debug(
-                    pc.red(pc.bold("INH ") + XUtils.encodeHex(header)),
-                );
-                this.log.debug(
-                    pc.red(pc.bold("IN ") + JSON.stringify(msg, null, 4)),
-                );
-
-                switch (msg.type) {
-                    case "ping":
-                        this.pong(msg.transmissionID);
-                        break;
-                    case "pong":
-                        this.setAlive(true);
-                        break;
-                    case "challenge":
-                        this.log.info("Received challenge from server.");
-                        this.respond(msg as IChallMsg);
-                        break;
-                    case "unauthorized":
-                        throw new Error(
-                            "Received unauthorized message from server.",
-                        );
-                    case "authorized":
-                        this.log.info(
-                            "Authenticated with userID " + this.user!.userID,
-                        );
-                        this.emit("connected");
-                        this.postAuth();
-                        break;
-                    case "success":
-                        break;
-                    case "error":
-                        this.log.warn(JSON.stringify(msg));
-                        break;
-                    case "notify":
-                        this.handleNotify(msg as INotifyMsg);
-                        break;
-                    default:
-                        this.log.info("Unsupported message " + msg.type);
-                        break;
-                }
-            });
-        } catch (err) {
-            throw new Error(
-                "Error initiating websocket connection " + err.toString(),
-            );
-        }
+        void this.send(receipt);
     }
 
     private setAlive(status: boolean) {
         this.isAlive = status;
     }
 
-    private async postAuth() {
-        let count = 0;
-        while (true) {
-            try {
-                await this.getMail();
-                count++;
-                this.fetchingMail = false;
-
-                if (count > 10) {
-                    this.negotiateOTK();
-                    count = 0;
-                }
-            } catch (err) {
-                this.log.warn("Problem fetching mail" + err.toString());
-            }
-            await sleep(1000 * 60);
-        }
-    }
-
-    private async getMail(): Promise<void> {
-        while (this.fetchingMail) {
-            await sleep(500);
-        }
-        this.fetchingMail = true;
-        let firstFetch = false;
-        if (this.firstMailFetch) {
-            firstFetch = true;
-            this.firstMailFetch = false;
-        }
-
-        if (firstFetch) {
-            this.emit("decryptingMail");
-        }
-
-        this.log.info("fetching mail for device " + this.getDevice().deviceID);
-        try {
-            const res = await this.ax.post(
-                this.getHost() +
-                    "/device/" +
-                    this.getDevice().deviceID +
-                    "/mail",
-            );
-            const inbox: Array<[Uint8Array, IMailWS, Date]> = msgpack
-                .decode(new Uint8Array(res.data))
-                .sort(
-                    (
-                        a: [Uint8Array, IMailWS, Date],
-                        b: [Uint8Array, IMailWS, Date],
-                    ) => b[2].getTime() - a[2].getTime(),
-                );
-
-            for (const mailDetails of inbox) {
-                const [mailHeader, mailBody, timestamp] = mailDetails;
-                try {
-                    await this.readMail(
-                        mailHeader,
-                        mailBody,
-                        timestamp.toString(),
-                    );
-                } catch (err) {
-                    console.warn(err.toString());
-                }
-            }
-        } catch (err) {
-            console.warn(err.toString());
-        }
-        this.fetchingMail = false;
-    }
-
-    /* header is 32 bytes and is either empty
-    or contains an HMAC of the message with
-    a derived SK */
-    private async send(msg: any, header?: Uint8Array) {
-        let i = 0;
-        while (this.conn.readyState !== 1) {
-            await sleep(i);
-            i *= 2;
-        }
-
-        this.log.debug(
-            pc.red(
-                pc.bold("OUTH ") +
-                    XUtils.encodeHex(header || XUtils.emptyHeader()),
-            ),
-        );
-        this.log.debug(pc.red(pc.bold("OUT ") + JSON.stringify(msg, null, 4)));
-
-        this.conn.send(XUtils.packMessage(msg, header));
-    }
-
-    private async retrieveKeyBundle(deviceID: string): Promise<IKeyBundle> {
-        const res = await this.ax.post(
-            this.getHost() + "/device/" + deviceID + "/keyBundle",
-        );
-        return msgpack.decode(new Uint8Array(res.data));
-    }
-
-    private async getOTKCount(): Promise<number> {
-        const res = await this.ax.get(
-            this.getHost() +
-                "/device/" +
-                this.getDevice().deviceID +
-                "/otk/count",
-        );
-        return msgpack.decode(new Uint8Array(res.data)).count;
+    private setUser(user: User): void {
+        this.user = user;
     }
 
     private async submitOTK(amount: number) {
-        const otks: IPreKeysCrypto[] = [];
+        const otks: UnsavedPreKey[] = [];
 
         const t0 = performance.now();
         for (let i = 0; i < amount; i++) {
@@ -3208,12 +3182,16 @@ export class Client extends EventEmitter {
         const t1 = performance.now();
 
         this.log.info(
-            "Generated " + amount + " one time keys in " + (t1 - t0) + " ms.",
+            "Generated " +
+                String(amount) +
+                " one time keys in " +
+                String(t1 - t0) +
+                " ms.",
         );
 
         const savedKeys = await this.database.savePreKeys(otks, true);
 
-        await this.ax.post(
+        await this.http.post(
             this.getHost() + "/device/" + this.getDevice().deviceID + "/otk",
             msgpack.encode(savedKeys.map((key) => this.censorPreKey(key))),
             {
@@ -3222,48 +3200,105 @@ export class Client extends EventEmitter {
         );
     }
 
-    private async negotiateOTK() {
-        const otkCount = await this.getOTKCount();
-        this.log.info("Server reported OTK: " + otkCount.toString());
-        const needs = xConstants.MIN_OTK_SUPPLY - otkCount;
-        if (needs === 0) {
-            this.log.info("Server otk supply full.");
+    private async uploadAvatar(avatar: Uint8Array): Promise<void> {
+        if (typeof FormData !== "undefined") {
+            const fpayload = new FormData();
+            fpayload.set("avatar", new Blob([new Uint8Array(avatar)]));
+
+            await this.http.post(
+                this.prefixes.HTTP +
+                    this.host +
+                    "/avatar/" +
+                    this.me.user().userID,
+                fpayload,
+                {
+                    headers: { "Content-Type": "multipart/form-data" },
+                    onUploadProgress: (progressEvent) => {
+                        const percentCompleted = Math.round(
+                            (progressEvent.loaded * 100) /
+                                (progressEvent.total ?? 1),
+                        );
+                        const { loaded, total = 0 } = progressEvent;
+                        const progress: FileProgress = {
+                            direction: "upload",
+                            loaded,
+                            progress: percentCompleted,
+                            token: this.getUser().userID,
+                            total,
+                        };
+                        this.emitter.emit("fileProgress", progress);
+                    },
+                },
+            );
             return;
         }
 
-        await this.submitOTK(needs);
-    }
-
-    private respond(msg: IChallMsg) {
-        const response: IRespMsg = {
-            transmissionID: msg.transmissionID,
-            type: "response",
-            signed: nacl.sign(msg.challenge, this.signKeys.secretKey),
+        const payload: { file: string } = {
+            file: XUtils.encodeBase64(avatar),
         };
-        this.send(response);
+        await this.http.post(
+            this.prefixes.HTTP +
+                this.host +
+                "/avatar/" +
+                this.me.user().userID +
+                "/json",
+            msgpack.encode(payload),
+            { headers: { "Content-Type": "application/msgpack" } },
+        );
     }
 
-    private pong(transmissionID: string) {
-        this.send({ transmissionID, type: "pong" });
-    }
+    private async uploadEmoji(
+        emoji: Uint8Array,
+        name: string,
+        serverID: string,
+    ): Promise<Emoji | null> {
+        if (typeof FormData !== "undefined") {
+            const fpayload = new FormData();
+            fpayload.set("emoji", new Blob([new Uint8Array(emoji)]));
+            fpayload.set("name", name);
 
-    private async ping() {
-        if (!this.isAlive) {
-            this.log.warn("Ping failed.");
+            try {
+                const res = await this.http.post(
+                    this.getHost() + "/emoji/" + serverID,
+                    fpayload,
+                    {
+                        headers: { "Content-Type": "multipart/form-data" },
+                        onUploadProgress: (progressEvent) => {
+                            const percentCompleted = Math.round(
+                                (progressEvent.loaded * 100) /
+                                    (progressEvent.total ?? 1),
+                            );
+                            const { loaded, total = 0 } = progressEvent;
+                            const progress: FileProgress = {
+                                direction: "upload",
+                                loaded,
+                                progress: percentCompleted,
+                                token: name,
+                                total,
+                            };
+                            this.emitter.emit("fileProgress", progress);
+                        },
+                    },
+                );
+                return decodeAxios(EmojiCodec, res.data);
+            } catch (_err: unknown) {
+                return null;
+            }
         }
-        this.setAlive(false);
-        this.send({ transmissionID: uuid.v4(), type: "ping" });
-    }
 
-    private censorPreKey(preKey: IPreKeysSQL): IPreKeysWS {
-        if (!preKey.index) {
-            throw new Error("Key index is required.");
-        }
-        return {
-            publicKey: XUtils.decodeHex(preKey.publicKey),
-            signature: XUtils.decodeHex(preKey.signature),
-            index: preKey.index,
-            deviceID: this.getDevice().deviceID,
+        const payload: { file: string; name: string } = {
+            file: XUtils.encodeBase64(emoji),
+            name,
         };
+        try {
+            const res = await this.http.post(
+                this.getHost() + "/emoji/" + serverID + "/json",
+                msgpack.encode(payload),
+                { headers: { "Content-Type": "application/msgpack" } },
+            );
+            return decodeAxios(EmojiCodec, res.data);
+        } catch (_err: unknown) {
+            return null;
+        }
     }
 }

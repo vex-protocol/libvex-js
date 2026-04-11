@@ -1,26 +1,29 @@
-export interface ILogger {
-    info(message: string, ...args: any[]): void;
-    warn(message: string, ...args: any[]): void;
-    error(message: string, ...args: any[]): void;
-    debug(message: string, ...args: any[]): void;
+export interface Logger {
+    debug(message: string, ...args: unknown[]): void;
+    error(message: string, ...args: unknown[]): void;
+    info(message: string, ...args: unknown[]): void;
+    warn(message: string, ...args: unknown[]): void;
 }
 
-export type IWebSocketCtor = new (
-    url: string,
-    options?: object,
-) => IWebSocketLike;
+export type WebSocketEvent = keyof WebSocketEventMap;
 
-export interface IWebSocketLike {
-    on(event: string, listener: (...args: any[]) => void): void;
-    off(event: string, listener: (...args: any[]) => void): void;
-    send(data: any): void;
+export interface WebSocketEventMap {
+    close: [];
+    error: [error: Error];
+    message: [data: Uint8Array];
+    open: [];
+}
+
+export interface WebSocketLike {
     close(): void;
-    terminate?(): void;
-    onerror: ((err: any) => void) | null;
+    off(event: "close" | "open", listener: () => void): void;
+    off(event: "error", listener: (error: Error) => void): void;
+    off(event: "message", listener: (data: Uint8Array) => void): void;
+    on(event: "close" | "open", listener: () => void): void;
+    on(event: "error", listener: (error: Error) => void): void;
+    on(event: "message", listener: (data: Uint8Array) => void): void;
+    onerror: ((err: Error | Event) => void) | null;
     readyState: number;
-}
-
-export interface IClientAdapters {
-    logger: ILogger;
-    WebSocket: IWebSocketCtor;
+    send(data: Uint8Array): void;
+    terminate?(): void;
 }

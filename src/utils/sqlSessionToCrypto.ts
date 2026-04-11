@@ -1,14 +1,16 @@
-import { XUtils } from "@vex-chat/crypto";
-import type { ISessionCrypto, ISessionSQL } from "@vex-chat/types";
+import type { SessionCrypto } from "../types/index.js";
+import type { SessionSQL } from "@vex-chat/types";
 
-export function sqlSessionToCrypto(session: ISessionSQL): ISessionCrypto {
+import { XUtils } from "@vex-chat/crypto";
+
+export function sqlSessionToCrypto(session: SessionSQL): SessionCrypto {
     return {
-        sessionID: session.sessionID,
-        userID: session.userID,
-        mode: session.mode,
-        SK: XUtils.decodeHex(session.SK),
-        publicKey: XUtils.decodeHex(session.publicKey),
-        lastUsed: session.lastUsed,
         fingerprint: XUtils.decodeHex(session.fingerprint),
+        lastUsed: session.lastUsed,
+        mode: session.mode,
+        publicKey: XUtils.decodeHex(session.publicKey),
+        sessionID: session.sessionID,
+        SK: XUtils.decodeHex(session.SK),
+        userID: session.userID,
     };
 }

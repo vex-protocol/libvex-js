@@ -1,8 +1,10 @@
-import { platformSuite } from "./harness/shared-suite.js";
-import { nodeTestAdapters } from "./harness/platform-transports.js";
-import { createNodeStorage } from "../storage/node.js";
-import type { IClientOptions } from "../index.js";
+import type { ClientOptions } from "../index.js";
 
-platformSuite("node", nodeTestAdapters, (SK: string, _opts: IClientOptions) =>
-    createNodeStorage(":memory:", SK),
+import { createNodeStorage } from "../storage/node.js";
+
+import { testLogger } from "./harness/platform-transports.js";
+import { platformSuite } from "./harness/shared-suite.js";
+
+platformSuite("node", testLogger, (SK: string, _opts: ClientOptions) =>
+    Promise.resolve(createNodeStorage(":memory:", SK)),
 );

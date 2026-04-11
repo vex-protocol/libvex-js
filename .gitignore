@@ -1,5 +1,4 @@
 node_modules
-./dist
 dist
 **/*.log
 .env*
@@ -12,8 +11,18 @@ databases
 test.key
 files
 avatars
-
 docs/
-.claude
+
+# api-extractor scratch dir
+temp/
+
+# Wrong lockfiles / package managers
+yarn.lock
+pnpm-lock.yaml
+
+# Verdaccio writes registry overrides here
 .npmrc
+
+# Agent/tool state
+.claude
 .beads

@@ -1,3 +1,20 @@
+import type { Message } from "../index.js";
+import type { Storage } from "../Storage.js";
+import type { Logger } from "../transport/types.js";
+import type {
+    PreKeysCrypto,
+    SessionCrypto,
+    UnsavedPreKey,
+} from "../types/index.js";
+import type {
+    ClientDatabase,
+    DeviceRow,
+    MessageRow,
+    SessionRow,
+} from "./schema.js";
+import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
+import type { Kysely } from "kysely";
+
 /**
  * Unified Kysely-based SQLite storage implementation.
  *
@@ -8,36 +25,32 @@
  * This replaces three separate storage classes (Storage.ts, TauriStorage,
  * ExpoStorage) with a single implementation.
  */
-import { XKeyConvert, XUtils } from "@vex-chat/crypto";
-import type {
-    IDevice,
-    IPreKeysCrypto,
-    IPreKeysSQL,
-    ISessionCrypto,
-    ISessionSQL,
-} from "@vex-chat/types";
-import { EventEmitter } from "eventemitter3";
-import type { Kysely } from "kysely";
-import nacl from "tweetnacl";
-import type { IMessage } from "../index.js";
-import type { IStorage } from "../IStorage.js";
-import type { ILogger } from "../transport/types.js";
-import type { ClientDatabase } from "./schema.js";
+import {
+    type KeyPair,
+    xBoxKeyPairFromSecret,
+    XKeyConvert,
+    xSecretbox,
+    xSecretboxOpen,
+    xSignKeyPairFromSecret,
+    XUtils,
+} from "@vex-chat/crypto";
 
-export class SqliteStorage extends EventEmitter implements IStorage {
+import { EventEmitter } from "eventemitter3";
+
+export class SqliteStorage extends EventEmitter implements Storage {
     public ready = false;
     private closing = false;
-    private db: Kysely<ClientDatabase>;
-    private log: ILogger;
-    private idKeys: nacl.BoxKeyPair;
+    private readonly db: Kysely<ClientDatabase>;
+    private readonly idKeys: KeyPair;
+    private readonly log: Logger;
 
-    constructor(db: Kysely<ClientDatabase>, SK: string, logger: ILogger) {
+    constructor(db: Kysely<ClientDatabase>, SK: string, logger: Logger) {
         super();
         this.db = db;
         this.log = logger;
 
         const idKeys = XKeyConvert.convertKeyPair(
-            nacl.sign.keyPair.fromSecretKey(XUtils.decodeHex(SK)),
+            xSignKeyPairFromSecret(XUtils.decodeHex(SK)),
         );
         if (!idKeys) {
             throw new Error("Can't convert SK!");
@@ -46,6 +59,249 @@ export class SqliteStorage extends EventEmitter implements IStorage {
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
+
+    async close(): Promise<void> {
+        this.closing = true;
+        this.log.info("Closing database.");
+        await this.db.destroy();
+    }
+
+    async deleteHistory(channelOrUserID: string): Promise<void> {
+        await this.db
+            .deleteFrom("messages")
+            .where((eb) =>
+                eb.or([
+                    eb("group", "=", channelOrUserID),
+                    eb.and([
+                        eb("group", "is", null),
+                        eb("authorID", "=", channelOrUserID),
+                    ]),
+                    eb.and([
+                        eb("group", "is", null),
+                        eb("readerID", "=", channelOrUserID),
+                    ]),
+                ]),
+            )
+            .execute();
+    }
+
+    // ── Messages ─────────────────────────────────────────────────────────────
+
+    async deleteMessage(mailID: string): Promise<void> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, deleteMessage() will not complete.",
+            );
+            return;
+        }
+        await this.db
+            .deleteFrom("messages")
+            .where("mailID", "=", mailID)
+            .execute();
+    }
+
+    async deleteOneTimeKey(index: number): Promise<void> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, deleteOneTimeKey() will not complete.",
+            );
+            return;
+        }
+        await this.db
+            .deleteFrom("oneTimeKeys")
+            .where("index", "=", index)
+            .execute();
+    }
+
+    async getAllSessions(): Promise<SessionSQL[]> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getAllSessions() will not complete.",
+            );
+            return [];
+        }
+        const rows = await this.db
+            .selectFrom("sessions")
+            .selectAll()
+            .orderBy("lastUsed", "desc")
+            .execute();
+
+        return rows.map((s) => this.sessionRowToSQL(s));
+    }
+
+    async getDevice(deviceID: string): Promise<Device | null> {
+        const rows = await this.db
+            .selectFrom("devices")
+            .selectAll()
+            .where("deviceID", "=", deviceID)
+            .execute();
+
+        const row = rows[0];
+        if (!row) {
+            return null;
+        }
+        return this.deviceRowToDevice(row);
+    }
+
+    async getGroupHistory(channelID: string): Promise<Message[]> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getGroupHistory() will not complete.",
+            );
+            return [];
+        }
+
+        const messages = await this.db
+            .selectFrom("messages")
+            .selectAll()
+            .where("group", "=", channelID)
+            .orderBy("timestamp", "asc")
+            .execute();
+
+        return this.decryptMessages(messages);
+    }
+
+    async getMessageHistory(userID: string): Promise<Message[]> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getMessageHistory() will not complete.",
+            );
+            return [];
+        }
+
+        const messages = await this.db
+            .selectFrom("messages")
+            .selectAll()
+            .where((eb) =>
+                eb.or([
+                    eb.and([
+                        eb("direction", "=", "incoming"),
+                        eb("authorID", "=", userID),
+                        eb("group", "is", null),
+                    ]),
+                    eb.and([
+                        eb("direction", "=", "outgoing"),
+                        eb("readerID", "=", userID),
+                        eb("group", "is", null),
+                    ]),
+                ]),
+            )
+            .orderBy("timestamp", "asc")
+            .execute();
+
+        return this.decryptMessages(messages);
+    }
+
+    // ── Sessions ─────────────────────────────────────────────────────────────
+
+    async getOneTimeKey(index: number): Promise<null | PreKeysCrypto> {
+        await this.untilReady();
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getOneTimeKey() will not complete.",
+            );
+            return null;
+        }
+
+        const rows = await this.db
+            .selectFrom("oneTimeKeys")
+            .selectAll()
+            .where("index", "=", index)
+            .execute();
+
+        const otkInfo = rows[0];
+        if (!otkInfo) {
+            this.log.debug("getOneTimeKey() => " + JSON.stringify(null));
+            return null;
+        }
+        return {
+            index: otkInfo.index,
+            keyPair: xBoxKeyPairFromSecret(
+                XUtils.decodeHex(otkInfo.privateKey),
+            ),
+            signature: XUtils.decodeHex(otkInfo.signature),
+        };
+    }
+
+    async getPreKeys(): Promise<null | PreKeysCrypto> {
+        await this.untilReady();
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getPreKeys() will not complete.",
+            );
+            return null;
+        }
+
+        const rows = await this.db.selectFrom("preKeys").selectAll().execute();
+
+        const preKeyInfo = rows[0];
+        if (!preKeyInfo) {
+            this.log.debug("getPreKeys() => " + JSON.stringify(null));
+            return null;
+        }
+        return {
+            index: preKeyInfo.index,
+            keyPair: xBoxKeyPairFromSecret(
+                XUtils.decodeHex(preKeyInfo.privateKey),
+            ),
+            signature: XUtils.decodeHex(preKeyInfo.signature),
+        };
+    }
+
+    async getSessionByDeviceID(
+        deviceID: string,
+    ): Promise<null | SessionCrypto> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getSessionByDeviceID() will not complete.",
+            );
+            return null;
+        }
+        const rows = await this.db
+            .selectFrom("sessions")
+            .selectAll()
+            .where("deviceID", "=", deviceID)
+            .orderBy("lastUsed", "desc")
+            .limit(1)
+            .execute();
+
+        const sessionRow = rows[0];
+        if (!sessionRow) {
+            this.log.debug("getSession() => " + JSON.stringify(null));
+            return null;
+        }
+
+        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
+    }
+
+    async getSessionByPublicKey(
+        publicKey: Uint8Array,
+    ): Promise<null | SessionCrypto> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, getSessionByPublicKey() will not complete.",
+            );
+            return null;
+        }
+        const hex = XUtils.encodeHex(publicKey);
+
+        const rows = await this.db
+            .selectFrom("sessions")
+            .selectAll()
+            .where("publicKey", "=", hex)
+            .limit(1)
+            .execute();
+
+        const sessionRow = rows[0];
+        if (!sessionRow) {
+            this.log.warn(
+                `getSessionByPublicKey(${hex}) => ${JSON.stringify(null)}`,
+            );
+            return null;
+        }
+
+        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
+    }
 
     async init(): Promise<void> {
         this.log.info("Initializing database tables.");
@@ -122,169 +378,12 @@ export class SqliteStorage extends EventEmitter implements IStorage {
 
             this.ready = true;
             this.emit("ready");
-        } catch (err) {
-            this.emit("error", err);
-        }
-    }
-
-    async close(): Promise<void> {
-        this.closing = true;
-        this.log.info("Closing database.");
-        await this.db.destroy();
-    }
-
-    // ── Messages ─────────────────────────────────────────────────────────────
-
-    async saveMessage(message: IMessage): Promise<void> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, saveMessage() will not complete.",
+        } catch (err: unknown) {
+            this.emit(
+                "error",
+                err instanceof Error ? err : new Error(String(err)),
             );
-            return;
         }
-
-        // Encrypt plaintext with our idkey before saving to disk
-        const encryptedMessage = XUtils.encodeHex(
-            nacl.secretbox(
-                XUtils.decodeUTF8(message.message),
-                XUtils.decodeHex(message.nonce),
-                this.idKeys.secretKey,
-            ),
-        );
-
-        try {
-            await this.db
-                .insertInto("messages")
-                .values({
-                    nonce: message.nonce,
-                    sender: message.sender,
-                    recipient: message.recipient,
-                    group: message.group ?? null,
-                    mailID: message.mailID,
-                    message: encryptedMessage,
-                    direction: message.direction,
-                    timestamp:
-                        message.timestamp instanceof Date
-                            ? message.timestamp.toISOString()
-                            : String(message.timestamp),
-                    decrypted: message.decrypted ? 1 : 0,
-                    forward: message.forward ? 1 : 0,
-                    authorID: message.authorID,
-                    readerID: message.readerID,
-                })
-                .execute();
-        } catch (err: any) {
-            if (this.closing) return;
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
-                this.log.warn("Duplicate nonce in message table.");
-            } else {
-                throw err;
-            }
-        }
-    }
-
-    async deleteMessage(mailID: string): Promise<void> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, deleteMessage() will not complete.",
-            );
-            return;
-        }
-        await this.db
-            .deleteFrom("messages")
-            .where("mailID", "=", mailID)
-            .execute();
-    }
-
-    async getMessageHistory(userID: string): Promise<IMessage[]> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getMessageHistory() will not complete.",
-            );
-            return [];
-        }
-
-        const messages = await this.db
-            .selectFrom("messages")
-            .selectAll()
-            .where((eb) =>
-                eb.or([
-                    eb.and([
-                        eb("direction", "=", "incoming"),
-                        eb("authorID", "=", userID),
-                        eb("group", "is", null),
-                    ]),
-                    eb.and([
-                        eb("direction", "=", "outgoing"),
-                        eb("readerID", "=", userID),
-                        eb("group", "is", null),
-                    ]),
-                ]),
-            )
-            .orderBy("timestamp", "asc")
-            .execute();
-
-        return this.decryptMessages(messages);
-    }
-
-    async getGroupHistory(channelID: string): Promise<IMessage[]> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getGroupHistory() will not complete.",
-            );
-            return [];
-        }
-
-        const messages = await this.db
-            .selectFrom("messages")
-            .selectAll()
-            .where("group", "=", channelID)
-            .orderBy("timestamp", "asc")
-            .execute();
-
-        return this.decryptMessages(messages);
-    }
-
-    async deleteHistory(
-        channelOrUserID: string,
-        _olderThan?: string,
-    ): Promise<void> {
-        await this.db
-            .deleteFrom("messages")
-            .where((eb) =>
-                eb.or([
-                    eb("group", "=", channelOrUserID),
-                    eb.and([
-                        eb("group", "is", null),
-                        eb("authorID", "=", channelOrUserID),
-                    ]),
-                    eb.and([
-                        eb("group", "is", null),
-                        eb("readerID", "=", channelOrUserID),
-                    ]),
-                ]),
-            )
-            .execute();
-    }
-
-    async purgeHistory(): Promise<void> {
-        await this.db.deleteFrom("messages").execute();
-    }
-
-    // ── Sessions ─────────────────────────────────────────────────────────────
-
-    async markSessionVerified(sessionID: string): Promise<void> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, markSessionVerified() will not complete.",
-            );
-            return;
-        }
-        await this.db
-            .updateTable("sessions")
-            .set({ verified: 1 })
-            .where("sessionID", "=", sessionID)
-            .execute();
     }
 
     async markSessionUsed(sessionID: string): Promise<void> {
@@ -301,239 +400,34 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             .execute();
     }
 
-    async getSessionByPublicKey(
-        publicKey: Uint8Array,
-    ): Promise<ISessionCrypto | null> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getSessionByPublicKey() will not complete.",
-            );
-            return null;
-        }
-        const hex = XUtils.encodeHex(publicKey);
-
-        const rows = await this.db
-            .selectFrom("sessions")
-            .selectAll()
-            .where("publicKey", "=", hex)
-            .limit(1)
-            .execute();
-
-        if (rows.length === 0) {
-            this.log.warn(
-                `getSessionByPublicKey(${hex}) => ${JSON.stringify(null)}`,
-            );
-            return null;
-        }
-
-        return this.sqlToCrypto(rows[0] as unknown as ISessionSQL);
-    }
-
-    async getAllSessions(): Promise<ISessionSQL[]> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getAllSessions() will not complete.",
-            );
-            return [];
-        }
-        const rows = await this.db
-            .selectFrom("sessions")
-            .selectAll()
-            .orderBy("lastUsed", "desc")
-            .execute();
-
-        return rows.map((s) => ({
-            ...(s as unknown as ISessionSQL),
-            verified: Boolean(s.verified),
-        }));
-    }
-
-    async getSessionByDeviceID(
-        deviceID: string,
-    ): Promise<ISessionCrypto | null> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getSessionByDeviceID() will not complete.",
-            );
-            return null;
-        }
-        const rows = await this.db
-            .selectFrom("sessions")
-            .selectAll()
-            .where("deviceID", "=", deviceID)
-            .orderBy("lastUsed", "desc")
-            .limit(1)
-            .execute();
-
-        if (rows.length === 0) {
-            this.log.debug("getSession() => " + JSON.stringify(null));
-            return null;
-        }
-
-        return this.sqlToCrypto(rows[0] as unknown as ISessionSQL);
-    }
-
-    async saveSession(session: ISessionSQL): Promise<void> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, saveSession() will not complete.",
-            );
-            return;
-        }
-        try {
-            await this.db
-                .insertInto("sessions")
-                .values({
-                    sessionID: session.sessionID,
-                    userID: session.userID,
-                    deviceID: session.deviceID,
-                    SK: session.SK,
-                    publicKey: session.publicKey,
-                    fingerprint: session.fingerprint,
-                    mode: session.mode,
-                    lastUsed:
-                        session.lastUsed instanceof Date
-                            ? session.lastUsed.toISOString()
-                            : String(session.lastUsed),
-                    verified: session.verified ? 1 : 0,
-                })
-                .execute();
-        } catch (err: any) {
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
-                this.log.warn("Attempted to insert duplicate SK");
-            } else {
-                throw err;
-            }
-        }
-    }
-
     // ── PreKeys / OneTimeKeys ────────────────────────────────────────────────
 
-    async savePreKeys(
-        preKeys: IPreKeysCrypto[],
-        oneTime: boolean,
-    ): Promise<IPreKeysSQL[]> {
-        await this.untilReady();
+    async markSessionVerified(sessionID: string): Promise<void> {
         if (this.closing) {
             this.log.warn(
-                "Database is closing, savePreKeys() will not complete.",
-            );
-            return [];
-        }
-
-        const table = oneTime ? ("oneTimeKeys" as const) : ("preKeys" as const);
-        const addedIndexes: number[] = [];
-
-        for (const preKey of preKeys) {
-            const result = await this.db
-                .insertInto(table)
-                .values({
-                    privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
-                    publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
-                    signature: XUtils.encodeHex(preKey.signature),
-                } as any)
-                .executeTakeFirst();
-            if (result.insertId !== undefined) {
-                addedIndexes.push(Number(result.insertId));
-            }
-        }
-
-        const rows = await this.db
-            .selectFrom(table)
-            .selectAll()
-            .where("index", "in", addedIndexes)
-            .execute();
-
-        return (rows as unknown as IPreKeysSQL[]).map((key) => {
-            delete key.privateKey;
-            return key;
-        });
-    }
-
-    async getPreKeys(): Promise<IPreKeysCrypto | null> {
-        await this.untilReady();
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getPreKeys() will not complete.",
-            );
-            return null;
-        }
-
-        const rows = await this.db.selectFrom("preKeys").selectAll().execute();
-
-        if (rows.length === 0) {
-            this.log.debug("getPreKeys() => " + JSON.stringify(null));
-            return null;
-        }
-
-        const preKeyInfo = rows[0];
-        return {
-            keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(preKeyInfo.privateKey),
-            ),
-            signature: XUtils.decodeHex(preKeyInfo.signature),
-        };
-    }
-
-    async getOneTimeKey(index: number): Promise<IPreKeysCrypto | null> {
-        await this.untilReady();
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, getOneTimeKey() will not complete.",
-            );
-            return null;
-        }
-
-        const rows = await this.db
-            .selectFrom("oneTimeKeys")
-            .selectAll()
-            .where("index", "=", index)
-            .execute();
-
-        if (rows.length === 0) {
-            this.log.debug("getOneTimeKey() => " + JSON.stringify(null));
-            return null;
-        }
-
-        const otkInfo = rows[0];
-        return {
-            keyPair: nacl.box.keyPair.fromSecretKey(
-                XUtils.decodeHex(otkInfo.privateKey),
-            ),
-            signature: XUtils.decodeHex(otkInfo.signature),
-            index: otkInfo.index as number,
-        };
-    }
-
-    async deleteOneTimeKey(index: number): Promise<void> {
-        if (this.closing) {
-            this.log.warn(
-                "Database is closing, deleteOneTimeKey() will not complete.",
+                "Database is closing, markSessionVerified() will not complete.",
             );
             return;
         }
         await this.db
-            .deleteFrom("oneTimeKeys")
-            .where("index", "=", index)
+            .updateTable("sessions")
+            .set({ verified: 1 })
+            .where("sessionID", "=", sessionID)
             .execute();
     }
 
-    // ── Devices ──────────────────────────────────────────────────────────────
-
-    async getDevice(deviceID: string): Promise<IDevice | null> {
-        const rows = await this.db
-            .selectFrom("devices")
-            .selectAll()
-            .where("deviceID", "=", deviceID)
-            .execute();
-
-        if (rows.length === 0) {
-            return null;
-        }
-        return rows[0] as unknown as IDevice;
+    async purgeHistory(): Promise<void> {
+        await this.db.deleteFrom("messages").execute();
     }
 
-    async saveDevice(device: IDevice): Promise<void> {
+    async purgeKeyData(): Promise<void> {
+        await this.db.deleteFrom("sessions").execute();
+        await this.db.deleteFrom("oneTimeKeys").execute();
+        await this.db.deleteFrom("preKeys").execute();
+        await this.db.deleteFrom("messages").execute();
+    }
+
+    async saveDevice(device: Device): Promise<void> {
         if (this.closing) {
             this.log.warn(
                 "Database is closing, saveDevice() will not complete.",
@@ -544,16 +438,16 @@ export class SqliteStorage extends EventEmitter implements IStorage {
             await this.db
                 .insertInto("devices")
                 .values({
+                    deleted: device.deleted ? 1 : 0,
                     deviceID: device.deviceID,
-                    owner: (device as any).owner,
+                    lastLogin: device.lastLogin,
+                    name: device.name,
+                    owner: device.owner,
                     signKey: device.signKey,
-                    name: (device as any).name,
-                    lastLogin: (device as any).lastLogin,
-                    deleted: (device as any).deleted ? 1 : 0,
                 })
                 .execute();
-        } catch (err: any) {
-            if (err?.errno === 19 || err?.message?.includes("UNIQUE")) {
+        } catch (err: unknown) {
+            if (this.isDuplicateError(err)) {
                 this.log.warn("Attempted to insert duplicate deviceID");
             } else {
                 throw err;
@@ -561,48 +455,208 @@ export class SqliteStorage extends EventEmitter implements IStorage {
         }
     }
 
+    // ── Devices ──────────────────────────────────────────────────────────────
+
+    async saveMessage(message: Message): Promise<void> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, saveMessage() will not complete.",
+            );
+            return;
+        }
+
+        // Encrypt plaintext with our idkey before saving to disk
+        const encryptedMessage = XUtils.encodeHex(
+            xSecretbox(
+                XUtils.decodeUTF8(message.message),
+                XUtils.decodeHex(message.nonce),
+                this.idKeys.secretKey,
+            ),
+        );
+
+        try {
+            await this.db
+                .insertInto("messages")
+                .values({
+                    authorID: message.authorID,
+                    decrypted: message.decrypted ? 1 : 0,
+                    direction: message.direction,
+                    forward: message.forward ? 1 : 0,
+                    group: message.group ?? null,
+                    mailID: message.mailID,
+                    message: encryptedMessage,
+                    nonce: message.nonce,
+                    readerID: message.readerID,
+                    recipient: message.recipient,
+                    sender: message.sender,
+                    timestamp: message.timestamp,
+                })
+                .execute();
+        } catch (err: unknown) {
+            if (this.isDuplicateError(err)) {
+                this.log.warn("Duplicate nonce in message table.");
+            } else {
+                throw err;
+            }
+        }
+    }
+
+    async savePreKeys(
+        preKeys: UnsavedPreKey[],
+        oneTime: boolean,
+    ): Promise<PreKeysSQL[]> {
+        await this.untilReady();
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, savePreKeys() will not complete.",
+            );
+            return [];
+        }
+
+        const table = oneTime ? ("oneTimeKeys" as const) : ("preKeys" as const);
+        const saved: PreKeysSQL[] = [];
+
+        for (const preKey of preKeys) {
+            const row = await this.db
+                .insertInto(table)
+                .values({
+                    privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
+                    publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
+                    signature: XUtils.encodeHex(preKey.signature),
+                })
+                .returning([
+                    "deviceID",
+                    "index",
+                    "keyID",
+                    "publicKey",
+                    "signature",
+                    "userID",
+                ])
+                .executeTakeFirstOrThrow();
+
+            saved.push(row);
+        }
+
+        return saved;
+    }
+
     // ── Purge ────────────────────────────────────────────────────────────────
 
-    async purgeKeyData(): Promise<void> {
-        await this.db.deleteFrom("sessions").execute();
-        await this.db.deleteFrom("oneTimeKeys").execute();
-        await this.db.deleteFrom("preKeys").execute();
-        await this.db.deleteFrom("messages").execute();
+    async saveSession(session: SessionSQL): Promise<void> {
+        if (this.closing) {
+            this.log.warn(
+                "Database is closing, saveSession() will not complete.",
+            );
+            return;
+        }
+        try {
+            await this.db
+                .insertInto("sessions")
+                .values({
+                    deviceID: session.deviceID,
+                    fingerprint: session.fingerprint,
+                    lastUsed: session.lastUsed,
+                    mode: session.mode,
+                    publicKey: session.publicKey,
+                    sessionID: session.sessionID,
+                    SK: session.SK,
+                    userID: session.userID,
+                    verified: session.verified ? 1 : 0,
+                })
+                .execute();
+        } catch (err: unknown) {
+            if (this.isDuplicateError(err)) {
+                this.log.warn("Attempted to insert duplicate SK");
+            } else {
+                throw err;
+            }
+        }
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private decryptMessages(messages: any[]): IMessage[] {
-        return messages.map((msg) => {
-            msg.timestamp = new Date(msg.timestamp);
-            msg.decrypted = Boolean(msg.decrypted);
-            msg.forward = Boolean(msg.forward);
+    private decryptMessages(messages: MessageRow[]): Message[] {
+        return messages.map((msg): Message => {
+            const decryptedFlag = msg.decrypted !== 0;
+            let plaintext = msg.message;
 
-            if (msg.decrypted) {
-                const decrypted = nacl.secretbox.open(
+            if (decryptedFlag) {
+                const decrypted = xSecretboxOpen(
                     XUtils.decodeHex(msg.message),
                     XUtils.decodeHex(msg.nonce),
                     this.idKeys.secretKey,
                 );
                 if (decrypted) {
-                    msg.message = XUtils.encodeUTF8(decrypted);
+                    plaintext = XUtils.encodeUTF8(decrypted);
                 } else {
                     throw new Error("Couldn't decrypt messages on disk!");
                 }
             }
-            return msg as IMessage;
+
+            const direction =
+                msg.direction === "incoming" ? "incoming" : "outgoing";
+
+            return {
+                authorID: msg.authorID,
+                decrypted: decryptedFlag,
+                direction,
+                forward: msg.forward !== 0,
+                group: msg.group,
+                mailID: msg.mailID,
+                message: plaintext,
+                nonce: msg.nonce,
+                readerID: msg.readerID,
+                recipient: msg.recipient,
+                sender: msg.sender,
+                timestamp: msg.timestamp,
+            };
         });
     }
 
-    private sqlToCrypto(session: ISessionSQL): ISessionCrypto {
+    private deviceRowToDevice(row: DeviceRow): Device {
         return {
-            sessionID: session.sessionID,
-            userID: session.userID,
-            mode: session.mode,
-            SK: XUtils.decodeHex(session.SK),
-            publicKey: XUtils.decodeHex(session.publicKey),
-            lastUsed: session.lastUsed,
+            deleted: row.deleted !== 0,
+            deviceID: row.deviceID,
+            lastLogin: row.lastLogin,
+            name: row.name,
+            owner: row.owner,
+            signKey: row.signKey,
+        };
+    }
+
+    private isDuplicateError(err: unknown): boolean {
+        if (err instanceof Error) {
+            return err.message.includes("UNIQUE");
+        }
+        if (typeof err === "object" && err !== null && "errno" in err) {
+            return err.errno === 19;
+        }
+        return false;
+    }
+
+    private sessionRowToSQL(row: SessionRow): SessionSQL {
+        return {
+            deviceID: row.deviceID,
+            fingerprint: row.fingerprint,
+            lastUsed: row.lastUsed,
+            mode: row.mode === "initiator" ? "initiator" : "receiver",
+            publicKey: row.publicKey,
+            sessionID: row.sessionID,
+            SK: row.SK,
+            userID: row.userID,
+            verified: row.verified !== 0,
+        };
+    }
+
+    private sqlToCrypto(session: SessionSQL): SessionCrypto {
+        return {
             fingerprint: XUtils.decodeHex(session.fingerprint),
+            lastUsed: session.lastUsed,
+            mode: session.mode,
+            publicKey: XUtils.decodeHex(session.publicKey),
+            sessionID: session.sessionID,
+            SK: XUtils.decodeHex(session.SK),
+            userID: session.userID,
         };
     }
 
@@ -610,7 +664,10 @@ export class SqliteStorage extends EventEmitter implements IStorage {
         if (this.ready) return;
         return new Promise((resolve) => {
             const check = () => {
-                if (this.ready) return resolve();
+                if (this.ready) {
+                    resolve();
+                    return;
+                }
                 setTimeout(check, 10);
             };
             check();

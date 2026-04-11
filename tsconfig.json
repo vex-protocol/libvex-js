@@ -1,24 +1,36 @@
 {
     "compilerOptions": {
-        "target": "ES2024",
-        "module": "NodeNext",
-        "moduleResolution": "NodeNext",
-        "lib": ["ES2024", "DOM"],
+        "target": "es2022",
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "moduleDetection": "force",
+        "lib": ["es2022", "DOM"],
+
         "declaration": true,
+        "declarationMap": true,
         "sourceMap": true,
         "outDir": "./dist",
         "rootDir": "./src",
+
         "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noPropertyAccessFromIndexSignature": true,
         "noImplicitReturns": true,
         "noImplicitOverride": true,
         "noFallthroughCasesInSwitch": true,
+        "allowUnusedLabels": false,
+        "allowUnreachableCode": false,
+        "noUncheckedSideEffectImports": true,
+
         "isolatedModules": true,
-        "useUnknownInCatchVariables": false,
         "verbatimModuleSyntax": true,
-        "resolveJsonModule": true,
+        "erasableSyntaxOnly": true,
         "forceConsistentCasingInFileNames": true,
+
+        "resolveJsonModule": true,
         "skipLibCheck": true
     },
     "include": ["src/**/*"],
-    "exclude": ["./scripts/*", "./dist/*", "src/__tests__"]
+    "exclude": ["./scripts/*", "./dist/*"]
 }
