@@ -91,12 +91,11 @@ export function decodeAxios<T>(
      */
     data: unknown,
 ): T {
-    // Node: axios returns Buffer (extends Uint8Array). Browser: ArrayBuffer.
     if (data instanceof Uint8Array) {
         return codec.decodeSafe(data);
     }
     if (data instanceof ArrayBuffer) {
         return codec.decodeSafe(new Uint8Array(data));
     }
-    throw new Error("Expected ArrayBuffer or Buffer from axios response");
+    throw new Error("Expected Uint8Array or ArrayBuffer from axios response");
 }
