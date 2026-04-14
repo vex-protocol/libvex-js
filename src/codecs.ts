@@ -70,7 +70,6 @@ export const DeviceChallengeCodec = createCodec(
 export const WhoamiCodec = createCodec(
     z.object({
         exp: z.number(),
-        token: z.string(),
         user: UserSchema,
     }),
 );

@@ -1034,20 +1034,28 @@ export class Client {
                 globalThis,
                 "\u0070rocess",
             );
-            if (!g || typeof g.value !== "object" || g.value === null) {
+            if (!g) return undefined;
+            // Node 24+ exposes `process` as an accessor (get/set), not a value.
+            const proc: unknown =
+                typeof g.get === "function" ? g.get() : g.value;
+            if (typeof proc !== "object" || proc === null) {
                 return undefined;
             }
-            const env: unknown = Object.getOwnPropertyDescriptor(
-                g.value,
-                "env",
-            )?.value;
+            const envDesc = Object.getOwnPropertyDescriptor(proc, "env");
+            if (!envDesc) return undefined;
+            const env: unknown =
+                typeof envDesc.get === "function"
+                    ? envDesc.get()
+                    : envDesc.value;
             if (typeof env !== "object" || env === null) {
                 return undefined;
             }
-            const val: unknown = Object.getOwnPropertyDescriptor(
-                env,
-                "NODE_ENV",
-            )?.value;
+            const valDesc = Object.getOwnPropertyDescriptor(env, "NODE_ENV");
+            if (!valDesc) return undefined;
+            const val: unknown =
+                typeof valDesc.get === "function"
+                    ? valDesc.get()
+                    : valDesc.value;
             return typeof val === "string" ? val : undefined;
         } catch {
             return undefined;
@@ -1085,9 +1093,12 @@ export class Client {
      * You can check whoami() to see before calling connect().
      */
     public async connect(): Promise<void> {
-        const { token, user } = await this.whoami();
-        this.token = token;
-        this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
+        if (!this.token) {
+            throw new Error(
+                "No token — call login() or loginWithDeviceKey() first.",
+            );
+        }
+        const { user } = await this.whoami();
         this.setUser(user);
 
         this.device = await this.retrieveOrCreateDevice();
@@ -1385,7 +1396,6 @@ export class Client {
      */
     public async whoami(): Promise<{
         exp: number;
-        token: string;
         user: User;
     }> {
         const res = await this.http.post(this.getHost() + "/whoami");
