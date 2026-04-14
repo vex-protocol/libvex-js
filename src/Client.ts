@@ -934,24 +934,21 @@ export class Client {
         storage?: Storage,
     ): Promise<Client> => {
         const opts = options;
+        const sk = privateKey ?? XUtils.encodeHex(xSignKeyPair().secretKey);
         let resolvedStorage = storage;
         if (!resolvedStorage) {
             const { createNodeStorage } = await import("./storage/node.js");
             const dbFileName = opts?.inMemoryDb
                 ? ":memory:"
                 : XUtils.encodeHex(
-                      xSignKeyPairFromSecret(XUtils.decodeHex(privateKey || ""))
-                          .publicKey,
+                      xSignKeyPairFromSecret(XUtils.decodeHex(sk)).publicKey,
                   ) + ".sqlite";
             const dbPath = opts?.dbFolder
                 ? opts.dbFolder + "/" + dbFileName
                 : dbFileName;
-            resolvedStorage = createNodeStorage(
-                dbPath,
-                privateKey || XUtils.encodeHex(xSignKeyPair().secretKey),
-            );
+            resolvedStorage = createNodeStorage(dbPath, sk);
         }
-        const client = new Client(privateKey, opts, resolvedStorage);
+        const client = new Client(sk, opts, resolvedStorage);
         await client.init();
         return client;
     };
