@@ -21,6 +21,28 @@ const hexVar = (min: number, max: number) =>
 const rec = (arbs: Record<string, fc.Arbitrary<unknown>>) =>
     fc.record(arbs, { noNullPrototype: true });
 
+/**
+ * Strip keys that are magic in JS (`__proto__`, `constructor`, `prototype`)
+ * from generated JSON values. These can't round-trip through msgpack because
+ * the JS runtime intercepts them on plain objects.
+ */
+function stripProtoKeys(val: unknown): unknown {
+    if (val === null || typeof val !== "object") return val;
+    if (Array.isArray(val)) return val.map(stripProtoKeys);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val)) {
+        if (k === "__proto__" || k === "constructor" || k === "prototype")
+            continue;
+        out[k] = stripProtoKeys(v);
+    }
+    return out;
+}
+
+const safeJsonValue = (opts?: { maxDepth?: number }) =>
+    fc
+        .jsonValue(opts)
+        .map((v) => stripProtoKeys(JSON.parse(JSON.stringify(v))));
+
 // ── Arbitraries ──────────────────────────────────────────────────────────────
 
 const arbBaseMsg = rec({
@@ -29,21 +51,14 @@ const arbBaseMsg = rec({
 });
 
 const arbSuccessMsg = rec({
-    data: fc
-        .jsonValue({ maxDepth: 1 })
-        .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
+    data: safeJsonValue({ maxDepth: 1 }),
     timestamp: fc.option(fc.string(), { nil: null }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("success"),
 });
 
 const arbErrMsg = rec({
-    data: fc.option(
-        fc
-            .jsonValue({ maxDepth: 1 })
-            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
-        { nil: null },
-    ),
+    data: fc.option(safeJsonValue({ maxDepth: 1 }), { nil: null }),
     error: fc.string({ minLength: 1 }),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("error"),
@@ -51,24 +66,14 @@ const arbErrMsg = rec({
 
 const arbResourceMsg = rec({
     action: fc.constantFrom("CREATE", "RETRIEVE", "UPDATE", "DELETE"),
-    data: fc.option(
-        fc
-            .jsonValue({ maxDepth: 1 })
-            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
-        { nil: null },
-    ),
+    data: fc.option(safeJsonValue({ maxDepth: 1 }), { nil: null }),
     resourceType: fc.constantFrom("mail", "preKeys", "otk"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("resource"),
 });
 
 const arbNotifyMsg = rec({
-    data: fc.option(
-        fc
-            .jsonValue({ maxDepth: 1 })
-            .map((v) => JSON.parse(JSON.stringify(v)) as unknown),
-        { nil: null },
-    ),
+    data: fc.option(safeJsonValue({ maxDepth: 1 }), { nil: null }),
     event: fc.constantFrom("mail", "serverChange", "permission"),
     transmissionID: fc.uuid({ version: 4 }),
     type: fc.constant("notify"),
