@@ -27,17 +27,17 @@ const _packr = new Packr({ moreTypes: false, useRecords: false });
 export function createCodec<T extends z.ZodType>(schema: T) {
     type Msg = z.infer<T>;
     return {
-        /** Decode msgpack data — typed but not validated. Fast path for SDK. */
+        /** Decode msgpack data and validate against the schema. */
         decode: (data: Uint8Array): Msg => schema.parse(decode(data)) as Msg,
 
-        /** Decode + validate with Zod. Safe path for trust boundaries (Spire). */
+        /** Alias for decode — both paths validate. Kept for API compat. */
         decodeSafe: (data: Uint8Array): Msg =>
             schema.parse(decode(data)) as Msg,
 
-        /** Encode to msgpack — typed but not validated. */
+        /** Encode to msgpack. */
         encode: (msg: Msg): Uint8Array => encode(msg),
 
-        /** Validate + encode. Ensures outgoing messages match the schema. */
+        /** Validate against the schema, then encode to msgpack. */
         encodeSafe: (msg: Msg): Uint8Array => {
             schema.parse(msg);
             return encode(msg);
