@@ -2672,10 +2672,18 @@ export class Client {
     or contains an HMAC of the message with
     a derived SK */
     private async send(msg: ClientMessage, header?: Uint8Array) {
-        let i = 0;
+        const maxWaitMs = 30_000;
+        let elapsed = 0;
+        let backoff = 50;
         while (this.socket.readyState !== 1) {
-            await sleep(i);
-            i *= 2;
+            if (elapsed >= maxWaitMs) {
+                throw new Error(
+                    "WebSocket did not reach OPEN state within 30 seconds.",
+                );
+            }
+            await sleep(backoff);
+            elapsed += backoff;
+            backoff = Math.min(backoff * 2, 4_000);
         }
 
         this.socket.send(XUtils.packMessage(msg, header));
