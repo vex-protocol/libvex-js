@@ -7,7 +7,6 @@
 
 import type { ClientOptions, Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
-import type { Logger } from "../../transport/types.js";
 
 import { Client } from "../../index.js";
 
@@ -15,7 +14,6 @@ import { testFile, testImage } from "./fixtures.js";
 
 export function platformSuite(
     platformName: string,
-    logger: Logger,
     makeStorage: (SK: string, opts: ClientOptions) => Promise<Storage>,
 ) {
     describe.sequential(`platform: ${platformName}`, () => {
@@ -26,10 +24,7 @@ export function platformSuite(
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
             const opts: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage = await makeStorage(SK, opts);
@@ -73,10 +68,7 @@ export function platformSuite(
         test("two-user DM", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -113,10 +105,7 @@ export function platformSuite(
         test("group messaging in channel", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -174,10 +163,7 @@ export function platformSuite(
             const deviceKey = client.getKeys().private;
             const deviceID = client.me.device().deviceID;
             const opts2: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(deviceKey, opts2);
@@ -274,10 +260,7 @@ export function platformSuite(
         test.todo("multi-device message sync", async () => {
             const SK2 = Client.generateSecretKey();
             const opts2: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage2 = await makeStorage(SK2, opts2);
@@ -286,10 +269,7 @@ export function platformSuite(
             // Sender: separate user
             const SK3 = Client.generateSecretKey();
             const opts3: ClientOptions = {
-                dbLogLevel: "error",
                 inMemoryDb: true,
-                logger,
-                logLevel: "error",
                 ...apiUrlOverrideFromEnv(),
             };
             const storage3 = await makeStorage(SK3, opts3);

@@ -1,5 +1,4 @@
 import type { Storage } from "../Storage.js";
-import type { Logger } from "../transport/types.js";
 import type { ClientDatabase } from "./schema.js";
 
 import BetterSqlite3 from "better-sqlite3";
@@ -11,23 +10,13 @@ import { Kysely, SqliteDialect } from "kysely";
 
 import { SqliteStorage } from "./sqlite.js";
 
-export function createNodeStorage(
-    dbPath: string,
-    SK: string,
-    logger?: Logger,
-): Storage {
+export function createNodeStorage(dbPath: string, SK: string): Storage {
     const db = new Kysely<ClientDatabase>({
         dialect: new SqliteDialect({
             database: new BetterSqlite3(dbPath),
         }),
     });
-    const log: Logger = logger ?? {
-        debug() {},
-        error() {},
-        info() {},
-        warn() {},
-    };
-    const storage = new SqliteStorage(db, SK, log);
+    const storage = new SqliteStorage(db, SK);
     void storage.init();
     return storage;
 }

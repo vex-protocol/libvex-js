@@ -1,5 +1,5 @@
 import type { Storage } from "./Storage.js";
-import type { Logger, WebSocketLike } from "./transport/types.js";
+import type { WebSocketLike } from "./transport/types.js";
 import type {
     PreKeysCrypto,
     SessionCrypto,
@@ -98,7 +98,6 @@ import {
     WhoamiCodec,
 } from "./codecs.js";
 import { capitalize } from "./utils/capitalize.js";
-import { formatBytes } from "./utils/formatBytes.js";
 import { sqlSessionToCrypto } from "./utils/sqlSessionToCrypto.js";
 import { uuidToUint8 } from "./utils/uint8uuid.js";
 
@@ -151,32 +150,12 @@ export type { Device } from "@vex-chat/types";
 export interface ClientOptions {
     /** Folder path where the sqlite file is created. */
     dbFolder?: string;
-    /** Logging level for storage/database logs. */
-    dbLogLevel?:
-        | "debug"
-        | "error"
-        | "http"
-        | "info"
-        | "silly"
-        | "verbose"
-        | "warn";
     /** Platform label for device registration (e.g. "ios", "macos", "linux"). */
     deviceName?: string;
     /** API host without protocol. Defaults to `api.vex.wtf`. */
     host?: string;
     /** Use sqlite in-memory mode (`:memory:`) instead of a file. */
     inMemoryDb?: boolean;
-    /** Logger implementation. When omitted, defaults to winston (Node.js). */
-    logger?: Logger;
-    /** Logging level for client runtime logs. */
-    logLevel?:
-        | "debug"
-        | "error"
-        | "http"
-        | "info"
-        | "silly"
-        | "verbose"
-        | "warn";
     /** Whether local message history should be persisted by default storage. */
     saveHistory?: boolean;
     /** Use `http/ws` instead of `https/wss`. Intended for local/dev environments. */
@@ -862,8 +841,6 @@ export class Client {
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
-    private readonly log: Logger;
-
     private readonly mailInterval?: NodeJS.Timeout;
 
     private manuallyClosing: boolean = false;
@@ -901,13 +878,6 @@ export class Client {
         // (no super — composition, not inheritance)
         this.options = options;
 
-        this.log = options?.logger ?? {
-            debug() {},
-            error() {},
-            info() {},
-            warn() {},
-        };
-
         this.prefixes = options?.unsafeHttp
             ? { HTTP: "http://", WS: "ws://" }
             : { HTTP: "https://", WS: "wss://" };
@@ -936,8 +906,7 @@ export class Client {
         }
         this.database = storage;
 
-        this.database.on("error", (error: Error) => {
-            this.log.error(error.toString());
+        this.database.on("error", (_error: Error) => {
             void this.close(true);
         });
 
@@ -946,29 +915,6 @@ export class Client {
         // Placeholder connection — replaced by initSocket() during connect()
         this.socket = new WebSocketAdapter("ws://localhost:1234");
         this.socket.onerror = () => {};
-
-        // Strip the `logger` field before stringifying — when a consumer
-        // passes a Winston logger instance (which has a circular
-        // `_readableState.pipes[0].parent` back-reference from the
-        // underlying file transport), JSON.stringify throws
-        // `TypeError: Converting circular structure to JSON`.
-        const { logger: _logger, ...safeOptions } = options ?? {};
-        this.log.info(
-            "Client debug information: " +
-                JSON.stringify(
-                    {
-                        dbPath: this.dbPath,
-                        environment: {
-                            platform: this.options?.deviceName ?? "unknown",
-                        },
-                        host: this.getHost(),
-                        options: safeOptions,
-                        publicKey: this.getKeys().public,
-                    },
-                    null,
-                    4,
-                ),
-        );
     }
     /**
      * Creates and initializes a client in one step.
@@ -987,33 +933,17 @@ export class Client {
         options?: ClientOptions,
         storage?: Storage,
     ): Promise<Client> => {
-        let opts = options;
-        if (!opts?.logger) {
-            const { createLogger: makeLog } =
-                await import("./utils/createLogger.js");
-            opts = {
-                ...opts,
-                logger: makeLog("libvex", opts?.logLevel),
-            };
-        }
-        // Lazily create Node Storage only on the Node path (no logger override).
-        // When a logger is provided (browser/RN), the caller must supply storage
-        // via BootstrapConfig.createStorage() — there is no Node fallback.
+        const opts = options;
         let resolvedStorage = storage;
         if (!resolvedStorage) {
-            if (opts.logger) {
-                throw new Error(
-                    "No storage provided. When using a custom logger (browser/RN), pass storage from your BootstrapConfig.",
-                );
-            }
             const { createNodeStorage } = await import("./storage/node.js");
-            const dbFileName = opts.inMemoryDb
+            const dbFileName = opts?.inMemoryDb
                 ? ":memory:"
                 : XUtils.encodeHex(
                       xSignKeyPairFromSecret(XUtils.decodeHex(privateKey || ""))
                           .publicKey,
                   ) + ".sqlite";
-            const dbPath = opts.dbFolder
+            const dbPath = opts?.dbFolder
                 ? opts.dbFolder + "/" + dbFileName
                 : dbFileName;
             resolvedStorage = createNodeStorage(
@@ -1077,8 +1007,6 @@ export class Client {
 
     public async close(muteEvent = false): Promise<void> {
         this.manuallyClosing = true;
-        this.log.info("Manually closing client.");
-
         this.socket.close();
         await this.database.close();
 
@@ -1126,7 +1054,6 @@ export class Client {
         const { deviceToken } = decodeAxios(ConnectResponseCodec, res.data);
         this.http.defaults.headers.common["X-Device-Token"] = deviceToken;
 
-        this.log.info("Starting websocket.");
         this.initSocket();
         // Yield the event loop so the WS open callback fires and sends the
         // auth message before OTK generation blocks for ~5s on mobile.
@@ -1205,7 +1132,6 @@ export class Client {
             return { ok: true };
         } catch (err: unknown) {
             const error = err instanceof Error ? err.message : String(err);
-            this.log.error("Login failed: " + error);
             return { error, ok: false };
         }
     }
@@ -1258,7 +1184,6 @@ export class Client {
             this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
         } catch (err: unknown) {
             const error = err instanceof Error ? err : new Error(String(err));
-            this.log.error("Device-key auth failed: " + error.message);
             return error;
         }
         return null;
@@ -1432,13 +1357,9 @@ export class Client {
 
     // returns the file details and the encryption key
     private async createFile(file: Uint8Array): Promise<[FileSQL, string]> {
-        this.log.info("Creating file, size: " + formatBytes(file.byteLength));
-
         const nonce = xMakeNonce();
         const key = xBoxKeyPair();
         const box = xSecretbox(Uint8Array.from(file), nonce, key.secretKey);
-
-        this.log.info("Encrypted size: " + formatBytes(box.byteLength));
 
         if (typeof FormData !== "undefined") {
             const fpayload = new FormData();
@@ -1536,27 +1457,11 @@ export class Client {
     ): Promise<void> {
         let keyBundle: KeyBundle;
 
-        this.log.info(
-            "Requesting key bundle for device: " +
-                JSON.stringify(device, null, 4),
-        );
         try {
             keyBundle = await this.retrieveKeyBundle(device.deviceID);
-        } catch (err: unknown) {
-            this.log.warn(
-                "Couldn't get key bundle:",
-                err instanceof Error ? err.message : String(err),
-            );
+        } catch {
             return;
         }
-
-        this.log.warn(
-            this.toString() +
-                " retrieved keybundle #" +
-                String(keyBundle.otk?.index ?? "none") +
-                " for " +
-                device.deviceID,
-        );
 
         if (!this.xKeyRing) {
             throw new Error("Key ring not initialized.");
@@ -1596,16 +1501,7 @@ export class Client {
 
         // shared secret key
         const SK = xKDF(IKM);
-        this.log.info("Obtained SK, " + XUtils.encodeHex(SK));
-
         const PK = xBoxKeyPairFromSecret(SK).publicKey;
-        this.log.info(
-            this.toString() +
-                " Obtained PK for " +
-                device.deviceID +
-                " " +
-                XUtils.encodeHex(PK),
-        );
 
         const AD = xConcat(
             xEncode(xConstants.CURVE, IK_AP),
@@ -1614,8 +1510,6 @@ export class Client {
 
         const nonce = xMakeNonce();
         const cipher = xSecretbox(message, nonce, SK);
-
-        this.log.info("Encrypted ciphertext.");
 
         /* 32 bytes for signkey, 32 bytes for ephemeral key, 
         68 bytes for AD, 6 bytes for otk index (empty for no otk) */
@@ -1642,8 +1536,6 @@ export class Client {
         };
 
         const hmac = xHMAC(mail, SK);
-        this.log.info("Mail hash: " + JSON.stringify(mail));
-        this.log.info("Generated hmac: " + XUtils.encodeHex(hmac));
 
         const msg: ResourceMsg = {
             action: "CREATE",
@@ -1656,8 +1548,6 @@ export class Client {
         // discard the ephemeral keys
         this.newEphemeralKeys();
 
-        // save the encryption session
-        this.log.info("Saving new session.");
         const sessionEntry: SessionSQL = {
             deviceID: device.deviceID,
             fingerprint: XUtils.encodeHex(AD),
@@ -1717,7 +1607,6 @@ export class Client {
             };
             this.socket.on("message", callback);
             void this.send(msg, hmac);
-            this.log.info("Mail sent.");
         });
         this.sending.delete(device.deviceID);
     }
@@ -1816,10 +1705,6 @@ export class Client {
         const msgBytes = Uint8Array.from(msgpack.encode(copy));
 
         const devices = await this.getUserDeviceList(this.getUser().userID);
-        this.log.info(
-            "Forwarding to my other devices, deviceList length is " +
-                String(devices?.length ?? 0),
-        );
 
         if (!devices) {
             throw new Error("Couldn't get own devices.");
@@ -1843,8 +1728,6 @@ export class Client {
             for (const result of results) {
                 const { status } = result;
                 if (status === "rejected") {
-                    this.log.warn("Message failed.");
-                    this.log.warn(JSON.stringify(result));
                 }
             }
         });
@@ -1879,13 +1762,11 @@ export class Client {
 
     private async getDeviceByID(deviceID: string): Promise<Device | null> {
         if (deviceID in this.deviceRecords) {
-            this.log.info("Found device in local cache.");
             return this.deviceRecords[deviceID] ?? null;
         }
 
         const device = await this.database.getDevice(deviceID);
         if (device) {
-            this.log.info("Found device in local db.");
             this.deviceRecords[deviceID] = device;
             return device;
         }
@@ -1893,7 +1774,6 @@ export class Client {
             const res = await this.http.get(
                 this.getHost() + "/device/" + deviceID,
             );
-            this.log.info("Retrieved device from server.");
             const fetchedDevice = decodeAxios(DeviceCodec, res.data);
             this.deviceRecords[deviceID] = fetchedDevice;
             await this.database.saveDevice(fetchedDevice);
@@ -1940,7 +1820,6 @@ export class Client {
             this.emitter.emit("decryptingMail");
         }
 
-        this.log.info("fetching mail for device " + this.getDevice().deviceID);
         try {
             const res = await this.http.post<ArrayBuffer>(
                 this.getHost() +
@@ -1958,12 +1837,12 @@ export class Client {
                 const [mailHeader, mailBody, timestamp] = mailDetails;
                 try {
                     await this.readMail(mailHeader, mailBody, timestamp);
-                } catch (err: unknown) {
-                    console.warn(String(err));
+                } catch {
+                    // readMail failures are non-fatal; skip this message
                 }
             }
-        } catch (err: unknown) {
-            console.warn(String(err));
+        } catch {
+            // inbox fetch failures are non-fatal
         }
         this.fetchingMail = false;
     }
@@ -2064,8 +1943,7 @@ export class Client {
                 responseType: "arraybuffer",
             });
             return decodeAxios(ActionTokenCodec, res.data);
-        } catch (err: unknown) {
-            this.log.warn(String(err));
+        } catch {
             return null;
         }
     }
@@ -2107,7 +1985,6 @@ export class Client {
     private async handleNotify(msg: NotifyMsg) {
         switch (msg.event) {
             case "mail":
-                this.log.info("Server has informed us of new mail.");
                 await this.getMail();
                 this.fetchingMail = false;
                 break;
@@ -2121,7 +1998,6 @@ export class Client {
                 // msg.data is the messageID for retry
                 break;
             default:
-                this.log.info("Unsupported notification event " + msg.event);
                 break;
         }
     }
@@ -2162,8 +2038,6 @@ export class Client {
             // Auth sent as first message after open
             this.socket = new WebSocketAdapter(wsUrl);
             this.socket.on("open", () => {
-                this.log.info("Connection opened.");
-                // Send auth as first message (encoded to bytes — protocol is binary).
                 const authMsg = JSON.stringify({
                     token: this.token,
                     type: "auth",
@@ -2173,7 +2047,6 @@ export class Client {
             });
 
             this.socket.on("close", () => {
-                this.log.info("Connection closed.");
                 if (this.pingInterval) {
                     clearInterval(this.pingInterval);
                     this.pingInterval = null;
@@ -2188,25 +2061,19 @@ export class Client {
             });
 
             this.socket.on("message", (message: Uint8Array) => {
-                const [header, raw] = XUtils.unpackMessage(message);
-
-                this.log.debug("INH " + XUtils.encodeHex(header));
-                this.log.debug("IN " + JSON.stringify(raw, null, 4));
+                const [_header, raw] = XUtils.unpackMessage(message);
 
                 const parseResult = WSMessageSchema.safeParse(raw);
                 if (!parseResult.success) {
-                    this.log.warn("Unknown WS message: " + JSON.stringify(raw));
                     return;
                 }
                 const msg = parseResult.data;
 
                 switch (msg.type) {
                     case "challenge":
-                        this.log.info("Received challenge from server.");
                         this.respond(msg);
                         break;
                     case "error":
-                        this.log.warn(JSON.stringify(msg));
                         break;
                     case "notify":
                         void this.handleNotify(msg);
@@ -2224,15 +2091,10 @@ export class Client {
                             "Received unauthorized message from server.",
                         );
                     case "authorized":
-                        this.log.info(
-                            "Authenticated with userID " +
-                                (this.user?.userID ?? "unknown"),
-                        );
                         this.emitter.emit("connected");
                         void this.postAuth();
                         break;
                     default:
-                        this.log.info("Unsupported message " + msg.type);
                         break;
                 }
             });
@@ -2269,10 +2131,8 @@ export class Client {
 
     private async negotiateOTK() {
         const otkCount = await this.getOTKCount();
-        this.log.info("Server reported OTK: " + otkCount.toString());
         const needs = xConstants.MIN_OTK_SUPPLY - otkCount;
         if (needs === 0) {
-            this.log.info("Server otk supply full.");
             return;
         }
 
@@ -2288,7 +2148,6 @@ export class Client {
 
     private ping() {
         if (!this.isAlive) {
-            this.log.warn("Ping failed.");
         }
         this.setAlive(false);
         void this.send({ transmissionID: uuid.v4(), type: "ping" });
@@ -2309,9 +2168,6 @@ export class Client {
         const preKeys: PreKeysCrypto =
             existingPreKeys ??
             (await (async () => {
-                this.log.warn(
-                    "No prekeys found in database, creating a new one.",
-                );
                 const unsaved = this.createPreKey();
                 const [saved] = await this.database.savePreKeys(
                     [unsaved],
@@ -2337,19 +2193,6 @@ export class Client {
             identityKeys,
             preKeys,
         };
-
-        this.log.info(
-            "Keyring populated:\n" +
-                JSON.stringify(
-                    {
-                        ephemeralKey: XUtils.encodeHex(ephemeralKeys.publicKey),
-                        preKey: XUtils.encodeHex(preKeys.keyPair.publicKey),
-                        signKey: XUtils.encodeHex(this.signKeys.publicKey),
-                    },
-                    null,
-                    4,
-                ),
-        );
     }
 
     private async postAuth() {
@@ -2364,9 +2207,7 @@ export class Client {
                     void this.negotiateOTK();
                     count = 0;
                 }
-            } catch (err: unknown) {
-                this.log.warn("Problem fetching mail" + String(err));
-            }
+            } catch {}
             await sleep(1000 * 60);
         }
     }
@@ -2390,7 +2231,6 @@ export class Client {
 
         try {
             const healSession = async () => {
-                this.log.info("Requesting retry of " + mail.mailID);
                 const deviceEntry = await this.getDeviceByID(mail.sender);
                 const [user, _err] = await this.fetchUser(mail.authorID);
                 if (deviceEntry && user) {
@@ -2405,10 +2245,8 @@ export class Client {
                 }
             };
 
-            this.log.info("Received mail from " + mail.sender);
             switch (mail.mailType) {
                 case MailType.initial:
-                    this.log.info("Initiating new session.");
                     const extraParts = Client.deserializeExtra(
                         MailType.initial,
                         new Uint8Array(mail.extra),
@@ -2424,48 +2262,18 @@ export class Client {
 
                     const preKeyIndex = XUtils.uint8ArrToNumber(indexBytes);
 
-                    this.log.info(
-                        this.toString() +
-                            " otk #" +
-                            String(preKeyIndex) +
-                            " indicated",
-                    );
-
                     const otk =
                         preKeyIndex === 0
                             ? null
                             : await this.database.getOneTimeKey(preKeyIndex);
 
-                    if (otk) {
-                        this.log.info(
-                            "otk #" +
-                                JSON.stringify(otk.index) +
-                                " retrieved from database.",
-                        );
-                    }
-
-                    this.log.info("signKey: " + XUtils.encodeHex(signKey));
-                    this.log.info("preKey: " + XUtils.encodeHex(ephKey));
-                    if (otk) {
-                        this.log.info(
-                            "OTK: " + XUtils.encodeHex(otk.keyPair.publicKey),
-                        );
-                    }
-
                     if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
-                        this.log.warn(
-                            "OTK index mismatch, received " +
-                                JSON.stringify(otk?.index) +
-                                ", expected " +
-                                preKeyIndex.toString(),
-                        );
                         return;
                     }
 
                     // their public keys
                     const IK_A_raw = XKeyConvert.convertPublicKey(signKey);
                     if (!IK_A_raw) {
-                        this.log.warn("Could not convert sign key to X25519.");
                         return;
                     }
                     const IK_A = IK_A_raw;
@@ -2493,26 +2301,9 @@ export class Client {
 
                     // shared secret key
                     const SK = xKDF(IKM);
-                    this.log.info(
-                        "Obtained SK for " +
-                            mail.sender +
-                            ", " +
-                            XUtils.encodeHex(SK),
-                    );
-
-                    // shared public key
                     const PK = xBoxKeyPairFromSecret(SK).publicKey;
-                    this.log.info(
-                        this.toString() +
-                            "Obtained PK for " +
-                            mail.sender +
-                            " " +
-                            XUtils.encodeHex(PK),
-                    );
 
                     const hmac = xHMAC(mail, SK);
-                    this.log.info("Mail hash: " + JSON.stringify(mail));
-                    this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
 
                     // associated data
                     const AD = xConcat(
@@ -2521,22 +2312,14 @@ export class Client {
                     );
 
                     if (!XUtils.bytesEqual(hmac, header)) {
-                        console.warn(
-                            "Mail authentication failed (HMAC did not match).",
-                        );
-                        console.warn(mail);
                         return;
                     }
-                    this.log.info("Mail authenticated successfully.");
-
                     const unsealed = xSecretboxOpen(
                         new Uint8Array(mail.cipher),
                         new Uint8Array(mail.nonce),
                         SK,
                     );
                     if (unsealed) {
-                        this.log.info("Decryption successful.");
-
                         let plaintext = "";
                         if (!mail.forward) {
                             plaintext = XUtils.encodeUTF8(unsealed);
@@ -2607,12 +2390,8 @@ export class Client {
                         if (user) {
                             this.emitter.emit("session", newSession, user);
                         } else {
-                            this.log.warn(
-                                "Couldn't retrieve user " + newSession.userID,
-                            );
                         }
                     } else {
-                        this.log.warn("Mail decryption failed.");
                     }
                     break;
                 case MailType.subsequent:
@@ -2638,27 +2417,12 @@ export class Client {
                     }
 
                     if (!session) {
-                        this.log.warn(
-                            "Couldn't find session public key " +
-                                XUtils.encodeHex(publicKey),
-                        );
                         void healSession();
                         return;
                     }
-                    this.log.info("Session found for " + mail.sender);
-                    this.log.info(
-                        "Mail nonce " +
-                            XUtils.encodeHex(new Uint8Array(mail.nonce)),
-                    );
-
                     const HMAC = xHMAC(mail, session.SK);
-                    this.log.info("Mail hash: " + JSON.stringify(mail));
-                    this.log.info("Calculated hmac: " + XUtils.encodeHex(HMAC));
 
                     if (!XUtils.bytesEqual(HMAC, header)) {
-                        this.log.warn(
-                            "Message authentication failed (HMAC does not match).",
-                        );
                         void healSession();
                         return;
                     }
@@ -2670,8 +2434,6 @@ export class Client {
                     );
 
                     if (decrypted) {
-                        this.log.info("Decryption successful.");
-                        // emit the message
                         const fwdMsg2 = mail.forward
                             ? messageSchema.parse(msgpack.decode(decrypted))
                             : null;
@@ -2702,7 +2464,6 @@ export class Client {
 
                         void this.database.markSessionUsed(session.sessionID);
                     } else {
-                        this.log.info("Decryption failed.");
                         void healSession();
 
                         // emit the message
@@ -2726,7 +2487,6 @@ export class Client {
                     }
                     break;
                 default:
-                    this.log.warn("Unsupported MailType:", mail.mailType);
                     break;
             }
         } finally {
@@ -2894,13 +2654,9 @@ export class Client {
             );
             device = decodeAxios(DeviceCodec, res.data);
         } catch (err: unknown) {
-            this.log.error(err instanceof Error ? err.message : String(err));
             if (isAxiosError(err) && err.response?.status === 404) {
-                // just in case
                 await this.database.purgeKeyData();
                 await this.populateKeyRing();
-
-                this.log.info("Attempting to register device.");
 
                 const newDevice = await this.registerDevice();
                 if (newDevice) {
@@ -2912,7 +2668,6 @@ export class Client {
                 throw err;
             }
         }
-        this.log.info("Got device " + JSON.stringify(device, null, 4));
         return device;
     }
 
@@ -2926,11 +2681,6 @@ export class Client {
             i *= 2;
         }
 
-        this.log.debug(
-            "OUTH " + XUtils.encodeHex(header || XUtils.emptyHeader()),
-        );
-        this.log.debug("OUT " + JSON.stringify(msg, null, 4));
-
         this.socket.send(XUtils.packMessage(msg, header));
     }
 
@@ -2943,29 +2693,15 @@ export class Client {
             this.userRecords[user.userID] = user;
         }
 
-        this.log.info(
-            "Sending to userlist:\n" + JSON.stringify(userList, null, 4),
-        );
-
         const mailID = uuid.v4();
         const promises: Array<Promise<void>> = [];
 
         const userIDs = [...new Set(userList.map((user) => user.userID))];
         const devices = await this.getMultiUserDeviceList(userIDs);
 
-        this.log.info(
-            "Retrieved devicelist:\n" + JSON.stringify(devices, null, 4),
-        );
-
         for (const device of devices) {
             const ownerRecord = this.userRecords[device.owner];
             if (!ownerRecord) {
-                this.log.warn(
-                    "Skipping device " +
-                        device.deviceID +
-                        ": no user record for owner " +
-                        device.owner,
-                );
                 continue;
             }
             promises.push(
@@ -2983,8 +2719,6 @@ export class Client {
             for (const result of results) {
                 const { status } = result;
                 if (status === "rejected") {
-                    this.log.warn("Message failed.");
-                    this.log.warn(JSON.stringify(result));
                 }
             }
         });
@@ -3001,20 +2735,8 @@ export class Client {
         retry = false,
     ): Promise<void> {
         while (this.sending.has(device.deviceID)) {
-            this.log.warn(
-                "Sending in progress to device ID " +
-                    device.deviceID +
-                    ", waiting.",
-            );
             await sleep(100);
         }
-        this.log.info(
-            "Sending mail to user: \n" + JSON.stringify(user, null, 4),
-        );
-        this.log.info(
-            "Sending mail to device:\n " +
-                JSON.stringify(device.deviceID, null, 4),
-        );
         this.sending.set(device.deviceID, device);
 
         const session = await this.database.getSessionByDeviceID(
@@ -3022,11 +2744,8 @@ export class Client {
         );
 
         if (!session || retry) {
-            this.log.info("Creating new session for " + device.deviceID);
             await this.createSession(device, user, msg, group, mailID, forward);
             return;
-        } else {
-            this.log.info("Found existing session for " + device.deviceID);
         }
 
         const nonce = xMakeNonce();
@@ -3056,8 +2775,6 @@ export class Client {
         };
 
         const hmac = xHMAC(mail, session.SK);
-        this.log.info("Mail hash: " + JSON.stringify(mail));
-        this.log.info("Calculated hmac: " + XUtils.encodeHex(hmac));
 
         const fwdOut = forward
             ? messageSchema.parse(msgpack.decode(msg))
@@ -3143,14 +2860,10 @@ export class Client {
                 for (const result of results) {
                     const { status } = result;
                     if (status === "rejected") {
-                        this.log.warn("Message failed.");
-                        this.log.warn(JSON.stringify(result));
                     }
                 }
             });
         } catch (err: unknown) {
-            this.log.error("Message threw exception.");
-            this.log.error(err instanceof Error ? err.message : String(err));
             throw err;
         }
     }
@@ -3175,19 +2888,9 @@ export class Client {
     private async submitOTK(amount: number) {
         const otks: UnsavedPreKey[] = [];
 
-        const t0 = performance.now();
         for (let i = 0; i < amount; i++) {
             otks[i] = this.createPreKey();
         }
-        const t1 = performance.now();
-
-        this.log.info(
-            "Generated " +
-                String(amount) +
-                " one time keys in " +
-                String(t1 - t0) +
-                " ms.",
-        );
 
         const savedKeys = await this.database.savePreKeys(otks, true);
 

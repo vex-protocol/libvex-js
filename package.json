@@ -1,6 +1,6 @@
 {
     "name": "@vex-chat/libvex",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "description": "Library for communicating with xchat server.",
     "type": "module",
     "sideEffects": false,
@@ -102,7 +102,6 @@
         "kysely": "0.28.16",
         "msgpackr": "1.11.8",
         "uuid": "8.3.2",
-        "winston": "3.19.0",
         "zod": "4.3.6"
     },
     "peerDependencies": {
