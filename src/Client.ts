@@ -1837,12 +1837,12 @@ export class Client {
                 const [mailHeader, mailBody, timestamp] = mailDetails;
                 try {
                     await this.readMail(mailHeader, mailBody, timestamp);
-                } catch {
-                    // readMail failures are non-fatal; skip this message
+                } catch (_readMailErr) {
+                    // non-fatal — inspect _readMailErr in a debugger
                 }
             }
-        } catch {
-            // inbox fetch failures are non-fatal
+        } catch (_fetchErr) {
+            // non-fatal — inspect _fetchErr in a debugger
         }
         this.fetchingMail = false;
     }
