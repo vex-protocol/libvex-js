@@ -28,6 +28,7 @@ import {
     type KeyPair,
     xBoxKeyPairFromSecret,
     XKeyConvert,
+    xMakeNonce,
     xSecretbox,
     xSecretboxOpen,
     xSignKeyPairFromSecret,
@@ -194,7 +195,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         return {
             index: otkInfo.index,
             keyPair: xBoxKeyPairFromSecret(
-                XUtils.decodeHex(otkInfo.privateKey),
+                XUtils.decodeHex(this.unsealHex(otkInfo.privateKey)),
             ),
             signature: XUtils.decodeHex(otkInfo.signature),
         };
@@ -215,7 +216,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
         return {
             index: preKeyInfo.index,
             keyPair: xBoxKeyPairFromSecret(
-                XUtils.decodeHex(preKeyInfo.privateKey),
+                XUtils.decodeHex(this.unsealHex(preKeyInfo.privateKey)),
             ),
             signature: XUtils.decodeHex(preKeyInfo.signature),
         };
@@ -467,7 +468,9 @@ export class SqliteStorage extends EventEmitter implements Storage {
             const row = await this.db
                 .insertInto(table)
                 .values({
-                    privateKey: XUtils.encodeHex(preKey.keyPair.secretKey),
+                    privateKey: this.sealHex(
+                        XUtils.encodeHex(preKey.keyPair.secretKey),
+                    ),
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
                     signature: XUtils.encodeHex(preKey.signature),
                 })
@@ -503,7 +506,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     mode: session.mode,
                     publicKey: session.publicKey,
                     sessionID: session.sessionID,
-                    SK: session.SK,
+                    SK: this.sealHex(session.SK),
                     userID: session.userID,
                     verified: session.verified ? 1 : 0,
                 })
@@ -578,6 +581,23 @@ export class SqliteStorage extends EventEmitter implements Storage {
         return false;
     }
 
+    /**
+     * Encrypt a hex-encoded secret for at-rest storage.
+     * Returns hex(nonce || ciphertext) where nonce is 24 random bytes.
+     */
+    private sealHex(plainHex: string): string {
+        const nonce = xMakeNonce();
+        const ct = xSecretbox(
+            XUtils.decodeHex(plainHex),
+            nonce,
+            this.idKeys.secretKey,
+        );
+        const sealed = new Uint8Array(nonce.length + ct.length);
+        sealed.set(nonce);
+        sealed.set(ct, nonce.length);
+        return XUtils.encodeHex(sealed);
+    }
+
     private sessionRowToSQL(row: SessionRow): SessionSQL {
         return {
             deviceID: row.deviceID,
@@ -586,7 +606,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             mode: row.mode === "initiator" ? "initiator" : "receiver",
             publicKey: row.publicKey,
             sessionID: row.sessionID,
-            SK: row.SK,
+            SK: this.unsealHex(row.SK),
             userID: row.userID,
             verified: row.verified !== 0,
         };
@@ -602,6 +622,21 @@ export class SqliteStorage extends EventEmitter implements Storage {
             SK: XUtils.decodeHex(session.SK),
             userID: session.userID,
         };
+    }
+
+    /**
+     * Decrypt a value produced by sealHex().
+     * Expects hex(nonce || ciphertext), returns the original hex string.
+     */
+    private unsealHex(sealed: string): string {
+        const bytes = XUtils.decodeHex(sealed);
+        const nonce = bytes.slice(0, 24);
+        const ct = bytes.slice(24);
+        const plain = xSecretboxOpen(ct, nonce, this.idKeys.secretKey);
+        if (!plain) {
+            throw new Error("Failed to decrypt sealed column value.");
+        }
+        return XUtils.encodeHex(plain);
     }
 
     private async untilReady(): Promise<void> {
