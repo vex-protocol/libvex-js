@@ -32,7 +32,6 @@ export interface Channels {
 // @public (undocumented)
 export class Client {
     channels: Channels;
-    // (undocumented)
     close(muteEvent?: boolean): Promise<void>;
     connect(): Promise<void>;
     static create: (privateKey?: string, options?: ClientOptions, storage?: Storage_2) => Promise<Client>;
@@ -57,13 +56,8 @@ export class Client {
     me: Me;
     messages: Messages;
     moderation: Moderation;
-    // Warning: (ae-forgotten-export) The symbol "ClientEvents" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
     off<E extends keyof ClientEvents>(event: E, fn?: ClientEvents[E], context?: unknown): this;
-    // (undocumented)
     on<E extends keyof ClientEvents>(event: E, fn: ClientEvents[E], context?: unknown): this;
-    // (undocumented)
     once<E extends keyof ClientEvents>(event: E, fn: ClientEvents[E], context?: unknown): this;
     permissions: Permissions_2;
     static randomUsername(): string;
@@ -81,6 +75,19 @@ export class Client {
         token: string;
         user: User;
     }>;
+}
+
+// @public
+export interface ClientEvents {
+    closed: () => void;
+    connected: () => void;
+    decryptingMail: () => void;
+    disconnect: () => void;
+    fileProgress: (progress: FileProgress) => void;
+    message: (message: Message) => void;
+    permission: (permission: Permission) => void;
+    ready: () => void;
+    session: (session: Session, user: User) => void;
 }
 
 // @public
@@ -142,6 +149,14 @@ export interface Invites {
     create: (serverID: string, duration: string) => Promise<Invite>;
     redeem: (inviteID: string) => Promise<Permission>;
     retrieve: (serverID: string) => Promise<Invite[]>;
+}
+
+// @public
+export interface KeyPair {
+    // (undocumented)
+    publicKey: Uint8Array;
+    // (undocumented)
+    secretKey: Uint8Array;
 }
 
 // @public
@@ -214,6 +229,12 @@ interface Permissions_2 {
 }
 export { Permissions_2 as Permissions }
 
+// @public
+export interface PreKeysCrypto extends UnsavedPreKey {
+    // (undocumented)
+    index: number;
+}
+
 export { Server }
 
 // @public (undocumented)
@@ -227,6 +248,23 @@ export interface Servers {
 
 // @public
 export type Session = SessionSQL;
+
+// @public
+export interface SessionCrypto {
+    // (undocumented)
+    fingerprint: Uint8Array;
+    // (undocumented)
+    lastUsed: string;
+    // (undocumented)
+    mode: "initiator" | "receiver";
+    // (undocumented)
+    publicKey: Uint8Array;
+    // (undocumented)
+    sessionID: string;
+    SK: Uint8Array;
+    // (undocumented)
+    userID: string;
+}
 
 // @public (undocumented)
 export interface Sessions {
@@ -245,10 +283,8 @@ interface Storage_2 extends EventEmitter {
     getDevice: (deviceID: string) => Promise<Device | null>;
     getGroupHistory: (channelID: string) => Promise<Message[]>;
     getMessageHistory: (userID: string) => Promise<Message[]>;
-    // Warning: (ae-forgotten-export) The symbol "PreKeysCrypto" needs to be exported by the entry point index.d.ts
     getOneTimeKey: (index: number) => Promise<null | PreKeysCrypto>;
     getPreKeys: () => Promise<null | PreKeysCrypto>;
-    // Warning: (ae-forgotten-export) The symbol "SessionCrypto" needs to be exported by the entry point index.d.ts
     getSessionByDeviceID: (deviceID: string) => Promise<null | SessionCrypto>;
     getSessionByPublicKey: (publicKey: Uint8Array) => Promise<null | SessionCrypto>;
     init: () => Promise<void>;
@@ -261,13 +297,12 @@ interface Storage_2 extends EventEmitter {
     ready: boolean;
     saveDevice: (device: Device) => Promise<void>;
     saveMessage: (message: Message) => Promise<void>;
-    // Warning: (ae-forgotten-export) The symbol "UnsavedPreKey" needs to be exported by the entry point index.d.ts
     savePreKeys: (preKeys: UnsavedPreKey[], oneTime: boolean) => Promise<PreKeysSQL[]>;
     saveSession: (session: Session) => Promise<void>;
 }
 export { Storage_2 as Storage }
 
-// @public (undocumented)
+// @public
 export interface StoredCredentials {
     // (undocumented)
     deviceID: string;
@@ -279,6 +314,14 @@ export interface StoredCredentials {
     token?: string;
     // (undocumented)
     username: string;
+}
+
+// @public
+export interface UnsavedPreKey {
+    // (undocumented)
+    keyPair: KeyPair;
+    // (undocumented)
+    signature: Uint8Array;
 }
 
 // @public

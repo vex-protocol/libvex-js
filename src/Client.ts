@@ -346,6 +346,33 @@ const mailInboxEntry = z.tuple([
 ]);
 
 /**
+ * Event signatures emitted by {@link Client}.
+ *
+ * Used as the type parameter for {@link Client.on}, {@link Client.off},
+ * and {@link Client.once}.
+ */
+export interface ClientEvents {
+    /** The client has been shut down (via {@link Client.close}). */
+    closed: () => void;
+    /** WebSocket authorized by the server; pre-auth setup begins. */
+    connected: () => void;
+    /** Mail decryption pass is in progress. */
+    decryptingMail: () => void;
+    /** WebSocket connection lost. */
+    disconnect: () => void;
+    /** Progress update for a file upload or download. */
+    fileProgress: (progress: FileProgress) => void;
+    /** A direct or group message was sent or received. */
+    message: (message: Message) => void;
+    /** A permission grant was created or modified. */
+    permission: (permission: Permission) => void;
+    /** Post-auth setup complete — safe to call messaging/user APIs. */
+    ready: () => void;
+    /** A new encryption session was established with a peer device. */
+    session: (session: Session, user: User) => void;
+}
+
+/**
  * @ignore
  */
 export interface Messages {
@@ -470,25 +497,6 @@ export interface Users {
 }
 
 /**
- * VexFile is an uploaded encrypted file.
- *
- * Common fields:
- * - `fileID`: file identifier
- * - `owner`: owner device/user ID
- * - `nonce`: file encryption nonce (hex)
- *
- * @example
- * ```ts
- * const file: VexFile = {
- *     fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
- *     owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
- *     nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
- * };
- * ```
- */
-export type VexFile = FileSQL;
-
-/**
  * Client provides an interface for you to use a vex chat server and
  * send end to end encrypted messages to other users.
  *
@@ -506,12 +514,10 @@ export type VexFile = FileSQL;
  *     await client.register(Client.randomUsername());
  *     await client.login();
  *
- *     // The authed event fires when login() successfully completes
- *     // and the server indicates you are authorized. You must wait to
- *     // perform any operations besides register() and login() until
- *     // this occurs.
- *     client.on("authed", async () => {
- *         const me = await client.users.me();
+ *     // The ready event fires after connect() finishes post-auth setup.
+ *     // Wait for it before performing messaging or user operations.
+ *     client.on("ready", async () => {
+ *         const me = client.me.user();
  *
  *         // send a message
  *         await client.messages.send(me.userID, "Hello world!");
@@ -528,19 +534,23 @@ export type VexFile = FileSQL;
  */
 
 /**
- * Event signatures emitted by {@link Client}.
+ * VexFile is an uploaded encrypted file.
+ *
+ * Common fields:
+ * - `fileID`: file identifier
+ * - `owner`: owner device/user ID
+ * - `nonce`: file encryption nonce (hex)
+ *
+ * @example
+ * ```ts
+ * const file: VexFile = {
+ *     fileID: "bb1c3fd1-4928-48ab-9d09-3ea0972fbd9d",
+ *     owner: "9b0f3f46-06ad-4bc4-8adf-4de10e13cb9c",
+ *     nonce: "aa6c8d42f3fdd032a1e9fced4be379582d26ce8f69822d64",
+ * };
+ * ```
  */
-interface ClientEvents {
-    closed: () => void;
-    connected: () => void;
-    decryptingMail: () => void;
-    disconnect: () => void;
-    fileProgress: (progress: FileProgress) => void;
-    message: (message: Message) => void;
-    permission: (permission: Permission) => void;
-    ready: () => void;
-    session: (session: Session, user: User) => void;
-}
+export type VexFile = FileSQL;
 
 export class Client {
     /**
@@ -570,32 +580,32 @@ export class Client {
     public channels: Channels = {
         /**
          * Creates a new channel in a server.
-         * @param name: The channel name.
-         * @param serverID: The unique serverID to create the channel in.
+         * @param name - The channel name.
+         * @param serverID - The server to create the channel in.
          *
-         * @returns - The created Channel object.
+         * @returns The created Channel object.
          */
         create: this.createChannel.bind(this),
         /**
          * Deletes a channel.
-         * @param channelID: The unique channelID to delete.
+         * @param channelID - The channel to delete.
          */
         delete: this.deleteChannel.bind(this),
         /**
          * Retrieves all channels in a server.
          *
-         * @returns - The list of Channel objects.
+         * @returns The list of Channel objects.
          */
         retrieve: this.getChannelList.bind(this),
         /**
          * Retrieves channel details by its unique channelID.
          *
-         * @returns - The list of Channel objects.
+         * @returns The Channel object, or null.
          */
         retrieveByID: this.getChannelByID.bind(this),
         /**
          * Retrieves a channel's userlist.
-         * @param channelID: The channelID to retrieve userlist for.
+         * @param channelID - The channel to retrieve the userlist for.
          */
         userList: this.getUserList.bind(this),
     };
@@ -628,9 +638,9 @@ export class Client {
     public files: Files = {
         /**
          * Uploads an encrypted file and returns the details and the secret key.
-         * @param file: The file as a Buffer.
+         * @param file - The file bytes.
          *
-         * @returns Details of the file uploaded and the key to encrypt in the form [details, key].
+         * @returns `[details, key]` — file metadata and the encryption key.
          */
         create: this.createFile.bind(this),
         retrieve: this.retrieveFile.bind(this),
@@ -661,19 +671,17 @@ export class Client {
      */
     public me: Me = {
         /**
-         * Retrieves current device details
+         * Retrieves current device details.
          *
-         * @returns - The logged in device's Device object.
+         * @returns The logged in device's Device object.
          */
         device: this.getDevice.bind(this),
-        /**
-         * Changes your avatar.
-         */
+        /** Changes your avatar. */
         setAvatar: this.uploadAvatar.bind(this),
         /**
-         * Retrieves your user information
+         * Retrieves your user information.
          *
-         * @returns - The logged in user's User object.
+         * @returns The logged in user's User object.
          */
         user: this.getUser.bind(this),
     };
@@ -691,29 +699,29 @@ export class Client {
         delete: this.deleteHistory.bind(this),
         /**
          * Send a group message to a channel.
-         * @param channelID: The channelID of the channel to send a message to.
-         * @param message: The message to send.
+         * @param channelID - The channel to send a message to.
+         * @param message - The message to send.
          */
         group: this.sendGroupMessage.bind(this),
         purge: this.purgeHistory.bind(this),
         /**
          * Gets the message history with a specific userID.
-         * @param userID: The userID of the user to retrieve message history for.
+         * @param userID - The user to retrieve message history for.
          *
-         * @returns - The list of Message objects.
+         * @returns The list of Message objects.
          */
         retrieve: this.getMessageHistory.bind(this),
         /**
-         * Gets the group message history with a specific channelID.
-         * @param chqnnelID: The channelID of the channel to retrieve message history for.
+         * Gets the group message history for a channel.
+         * @param channelID - The channel to retrieve message history for.
          *
-         * @returns - The list of Message objects.
+         * @returns The list of Message objects.
          */
         retrieveGroup: this.getGroupHistory.bind(this),
         /**
          * Send a direct message.
-         * @param userID: The userID of the user to send a message to.
-         * @param message: The message to send.
+         * @param userID - The user to send a message to.
+         * @param message - The message to send.
          */
         send: this.sendMessage.bind(this),
     };
@@ -748,27 +756,27 @@ export class Client {
     public servers: Servers = {
         /**
          * Creates a new server.
-         * @param name: The server name.
+         * @param name - The server name.
          *
-         * @returns - The created Server object.
+         * @returns The created Server object.
          */
         create: this.createServer.bind(this),
         /**
          * Deletes a server.
-         * @param serverID: The unique serverID to delete.
+         * @param serverID - The server to delete.
          */
         delete: this.deleteServer.bind(this),
         leave: this.leaveServer.bind(this),
         /**
          * Retrieves all servers the logged in user has access to.
          *
-         * @returns - The list of Server objects.
+         * @returns The list of Server objects.
          */
         retrieve: this.getServerList.bind(this),
         /**
          * Retrieves server details by its unique serverID.
          *
-         * @returns - The requested Server object, or null if the id does not exist.
+         * @returns The requested Server object, or null if the id does not exist.
          */
         retrieveByID: this.getServerByID.bind(this),
     };
@@ -778,25 +786,24 @@ export class Client {
      */
     public sessions: Sessions = {
         /**
-         * Marks a mnemonic verified, implying that the the user has confirmed
+         * Marks a session as verified, implying that the user has confirmed
          * that the session mnemonic matches with the other user.
-         * @param sessionID the sessionID of the session to mark.
-         * @param status Optionally, what to mark it as. Defaults to true.
+         * @param sessionID - The session to mark.
          */
         markVerified: this.markSessionVerified.bind(this),
 
         /**
          * Gets all encryption sessions.
          *
-         * @returns - The list of Session encryption sessions.
+         * @returns The list of Session encryption sessions.
          */
         retrieve: this.getSessionList.bind(this),
 
         /**
          * Returns a mnemonic for the session, to verify with the other user.
-         * @param session the Session object to get the mnemonic for.
+         * @param session - The session to get the mnemonic for.
          *
-         * @returns - The mnemonic representation of the session.
+         * @returns The mnemonic representation of the session.
          */
         verify: (session: SessionSQL) => Client.getMnemonic(session),
     };
@@ -814,14 +821,14 @@ export class Client {
         /**
          * Retrieves the list of users you can currently access, or are already familiar with.
          *
-         * @returns - The list of User objects.
+         * @returns The list of User objects.
          */
         familiars: this.getFamiliars.bind(this),
         /**
          * Retrieves a user's information by a string identifier.
-         * @param identifier: A userID, hex string public key, or a username.
+         * @param identifier - A userID, hex string public key, or a username.
          *
-         * @returns - The user's User object, or null if the user does not exist.
+         * @returns The user's User object, or null if the user does not exist.
          */
         retrieve: this.fetchUser.bind(this),
     };
@@ -933,9 +940,9 @@ export class Client {
     /**
      * Creates and initializes a client in one step.
      *
-     * @param privateKey Optional hex secret key. When omitted, a fresh key is generated.
-     * @param options Runtime options.
-     * @param storage Optional custom storage backend implementing `Storage`.
+     * @param privateKey - Hex secret key. When omitted, a fresh key is generated.
+     * @param options - Runtime options.
+     * @param storage - Custom storage backend implementing {@link Storage}.
      *
      * @example
      * ```ts
@@ -970,7 +977,7 @@ export class Client {
     /**
      * Generates an ed25519 secret key as a hex string.
      *
-     * @returns - A secret key to use for the client. Save it permanently somewhere safe.
+     * @returns A secret key to use for the client. Save it permanently somewhere safe.
      */
     public static generateSecretKey(): string {
         return XUtils.encodeHex(xSignKeyPair().secretKey);
@@ -979,7 +986,7 @@ export class Client {
     /**
      * Generates a random username using bip39.
      *
-     * @returns - The username.
+     * @returns The username.
      */
     public static randomUsername() {
         const IKM = XUtils.decodeHex(XUtils.encodeHex(xRandomBytes(16)));
@@ -1047,6 +1054,12 @@ export class Client {
         }
     }
 
+    /**
+     * Closes the client — disconnects the WebSocket, shuts down storage,
+     * and emits `closed` unless `muteEvent` is `true`.
+     *
+     * @param muteEvent - When `true`, suppresses the `closed` event.
+     */
     public async close(muteEvent = false): Promise<void> {
         this.manuallyClosing = true;
         this.socket.close();
@@ -1104,9 +1117,6 @@ export class Client {
     }
 
     /**
-     * Manually closes the client. Emits the closed event on successful shutdown.
-     */
-    /**
      * Delete all local data — message history, encryption sessions, and prekeys.
      * Closes the client afterward. Credentials (keychain) must be cleared by the consumer.
      */
@@ -1141,8 +1151,8 @@ export class Client {
     /**
      * Authenticates with username/password and stores the Bearer auth token.
      *
-     * @param username Account username.
-     * @param password Account password.
+     * @param username - Account username.
+     * @param password - Account password.
      * @returns `{ ok: true }` on success, `{ ok: false, error }` on failure.
      *
      * @example
@@ -1238,6 +1248,7 @@ export class Client {
         await this.http.post(this.getHost() + "/goodbye");
     }
 
+    /** Removes an event listener. See {@link ClientEvents} for available events. */
     off<E extends keyof ClientEvents>(
         event: E,
         fn?: ClientEvents[E],
@@ -1252,6 +1263,7 @@ export class Client {
         return this;
     }
 
+    /** Subscribes to an event. See {@link ClientEvents} for available events. */
     on<E extends keyof ClientEvents>(
         event: E,
         fn: ClientEvents[E],
@@ -1262,6 +1274,7 @@ export class Client {
         return this;
     }
 
+    /** Subscribes to an event for a single firing, then auto-removes. */
     once<E extends keyof ClientEvents>(
         event: E,
         fn: ClientEvents[E],
@@ -1274,11 +1287,15 @@ export class Client {
 
     /**
      * Registers a new account on the server.
-     * @param username The username to register. Must be unique.
      *
-     * @returns The error, or the user object.
+     * @param username - The username to register. Must be unique.
+     * @param password - Account password.
+     * @returns `[user, null]` on success, `[null, error]` on failure.
      *
-     * @example [user, err] = await client.register("MyUsername");
+     * @example
+     * ```ts
+     * const [user, err] = await client.register("MyUsername", "hunter2");
+     * ```
      */
     public async register(
         username: string,
@@ -1691,7 +1708,7 @@ export class Client {
     /**
      * Gets a list of permissions for a server.
      *
-     * @returns - The list of Permissions objects.
+     * @returns The list of Permission objects.
      */
     private async fetchPermissionList(serverID: string): Promise<Permission[]> {
         const res = await this.http.get(
@@ -1933,7 +1950,7 @@ export class Client {
     /**
      * Gets all permissions for the logged in user.
      *
-     * @returns - The list of Permissions objects.
+     * @returns The list of Permission objects.
      */
     private async getPermissions(): Promise<Permission[]> {
         const res = await this.http.get(
