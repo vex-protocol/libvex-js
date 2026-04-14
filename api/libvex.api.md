@@ -86,12 +86,9 @@ export class Client {
 // @public
 export interface ClientOptions {
     dbFolder?: string;
-    dbLogLevel?: "debug" | "error" | "http" | "info" | "silly" | "verbose" | "warn";
     deviceName?: string;
     host?: string;
     inMemoryDb?: boolean;
-    logger?: Logger;
-    logLevel?: "debug" | "error" | "http" | "info" | "silly" | "verbose" | "warn";
     saveHistory?: boolean;
     unsafeHttp?: boolean;
 }
@@ -161,18 +158,6 @@ export interface KeyStore {
     load(username?: string): Promise<null | StoredCredentials>;
     // (undocumented)
     save(creds: StoredCredentials): Promise<void>;
-}
-
-// @public (undocumented)
-export interface Logger {
-    // (undocumented)
-    debug(message: string, ...args: unknown[]): void;
-    // (undocumented)
-    error(message: string, ...args: unknown[]): void;
-    // (undocumented)
-    info(message: string, ...args: unknown[]): void;
-    // (undocumented)
-    warn(message: string, ...args: unknown[]): void;
 }
 
 // @public (undocumented)
