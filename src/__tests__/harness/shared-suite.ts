@@ -27,7 +27,7 @@ export function platformSuite(
 
             const opts: ClientOptions = {
                 inMemoryDb: true,
-                ...override,
+                ...apiUrlOverrideFromEnv(),
             };
             const storage = await makeStorage(SK, opts);
             client = await Client.create(SK, opts, storage);
