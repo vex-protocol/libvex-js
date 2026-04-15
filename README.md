@@ -7,7 +7,6 @@
 [![Types](https://img.shields.io/npm/types/@vex-chat/libvex?style=flat-square&logo=typescript&color=3178c6)](./dist/index.d.ts)
 [![Type Coverage](https://img.shields.io/badge/dynamic/json?style=flat-square&label=type-coverage&prefix=%E2%89%A5&suffix=%25&query=$.typeCoverage.atLeast&url=https://raw.githubusercontent.com/vex-protocol/libvex-js/master/package.json&color=3178c6&logo=typescript)](https://github.com/plantain-00/type-coverage)
 [![Node](https://img.shields.io/node/v/@vex-chat/libvex?style=flat-square&color=339933&logo=nodedotjs)](./package.json)
-[![Bundle](https://deno.bundlejs.com/badge?q=@vex-chat/libvex&treeshake=[*])](https://bundlejs.com/?q=@vex-chat/libvex&treeshake=[*])
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/vex-protocol/libvex-js?style=flat-square&label=Scorecard)](https://securityscorecards.dev/viewer/?uri=github.com/vex-protocol/libvex-js)
 [![Socket](https://socket.dev/api/badge/npm/package/@vex-chat/libvex)](https://socket.dev/npm/package/@vex-chat/libvex)
 
