@@ -85,7 +85,6 @@
         "@types/better-sqlite3": "7.6.13",
         "@types/ed2curve": "0.2.4",
         "@types/node": "24.12.2",
-        "@types/uuid": "11.0.0",
         "@vitest/eslint-plugin": "1.6.15",
         "better-sqlite3": "11.10.0",
         "eslint": "10.2.0",
@@ -104,7 +103,7 @@
         "vitest": "3.2.4"
     },
     "dependencies": {
-        "@vex-chat/crypto": "2.0.0",
+        "@vex-chat/crypto": "2.0.1",
         "@vex-chat/types": "2.0.0",
         "axios": "1.15.0",
         "eventemitter3": "5.0.4",
