@@ -132,6 +132,8 @@ jobs:
               run: |
                   npm run lint:api
                   git diff --exit-code api/
+            - name: typedoc (no doc warnings)
+              run: npx typedoc --options typedoc.json --treatWarningsAsErrors
 
     supply-chain:
         name: Supply Chain

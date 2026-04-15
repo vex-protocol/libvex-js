@@ -1,6 +1,6 @@
 {
     "name": "@vex-chat/libvex",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "description": "Library for communicating with xchat server.",
     "type": "module",
     "sideEffects": false,
@@ -9,35 +9,43 @@
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
         },
         "./preset/node": {
             "types": "./dist/preset/node.d.ts",
-            "import": "./dist/preset/node.js"
+            "import": "./dist/preset/node.js",
+            "default": "./dist/preset/node.js"
         },
         "./preset/test": {
             "types": "./dist/preset/test.d.ts",
-            "import": "./dist/preset/test.js"
+            "import": "./dist/preset/test.js",
+            "default": "./dist/preset/test.js"
         },
         "./storage/node": {
             "types": "./dist/storage/node.d.ts",
-            "import": "./dist/storage/node.js"
+            "import": "./dist/storage/node.js",
+            "default": "./dist/storage/node.js"
         },
         "./storage/sqlite": {
             "types": "./dist/storage/sqlite.d.ts",
-            "import": "./dist/storage/sqlite.js"
+            "import": "./dist/storage/sqlite.js",
+            "default": "./dist/storage/sqlite.js"
         },
         "./storage/schema": {
             "types": "./dist/storage/schema.d.ts",
-            "import": "./dist/storage/schema.js"
+            "import": "./dist/storage/schema.js",
+            "default": "./dist/storage/schema.js"
         },
         "./keystore/node": {
             "types": "./dist/keystore/node.d.ts",
-            "import": "./dist/keystore/node.js"
+            "import": "./dist/keystore/node.js",
+            "default": "./dist/keystore/node.js"
         },
         "./keystore/memory": {
             "types": "./dist/keystore/memory.d.ts",
-            "import": "./dist/keystore/memory.js"
+            "import": "./dist/keystore/memory.js",
+            "default": "./dist/keystore/memory.js"
         }
     },
     "files": [
@@ -60,6 +68,7 @@
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
         "lint:pkg": "publint --strict",
+        "lint:pkgjson": "npx npm-package-json-lint .",
         "lint:types": "attw --pack . --ignore-rules cjs-resolves-to-esm no-resolution",
         "lint:api": "api-extractor run --local --verbose",
         "prepare": "husky",
@@ -76,7 +85,7 @@
         "@types/better-sqlite3": "7.6.13",
         "@types/ed2curve": "0.2.4",
         "@types/node": "24.12.2",
-        "@types/uuid": "8.3.4",
+        "@types/uuid": "11.0.0",
         "@vitest/eslint-plugin": "1.6.15",
         "better-sqlite3": "11.10.0",
         "eslint": "10.2.0",
@@ -101,8 +110,7 @@
         "eventemitter3": "5.0.4",
         "kysely": "0.28.16",
         "msgpackr": "1.11.8",
-        "uuid": "8.3.2",
-        "winston": "3.19.0",
+        "uuid": "13.0.0",
         "zod": "4.3.6"
     },
     "peerDependencies": {

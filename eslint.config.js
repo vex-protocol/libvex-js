@@ -35,6 +35,7 @@ export default tseslint.config(
                     varsIgnorePattern: "^_",
                 },
             ],
+            "no-console": "error",
 
             "perfectionist/sort-imports": [
                 "error",

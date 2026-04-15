@@ -17,12 +17,13 @@ Reference TypeScript client for the [Vex](https://vex.wtf) encrypted chat platfo
 
 ## What's in the box
 
-- **End-to-end encrypted messaging** with X3DH key agreement and a Double Ratchet message stack — sessions, prekeys, and one-time keys handled internally.
+The client implements an X3DH-style handshake (X25519 DH + KDF), XSalsa20-Poly1305 (xSecretbox) for payloads, and HMAC over mail objects for integrity on the wire. Message payloads are intended to be end-to-end encrypted; the server still sees ciphertext, routing metadata, timing, and who talks to whom, and controls key-bundle distribution—so a malicious or compromised Spire can mount impersonation unless users verify sessions out-of-band.
+
+- **End-to-end encrypted messaging** with X3DH key agreement — sessions, prekeys, and one-time keys handled internally.
 - **Tree-shakable subpath exports** for platform-specific code: `./preset/node`, `./preset/test`, `./storage/node`, `./storage/sqlite`, `./storage/schema`, `./keystore/node`, `./keystore/memory`. Browser bundles never pull in `better-sqlite3` or other native modules.
 - **Pluggable storage backend** via Kysely so node consumers can use SQLite and browser/tauri/expo consumers can wire their own.
 - **Pluggable key store** so secrets can live in memory (tests), the OS keychain (`./keystore/node`), or wherever the embedding app keeps them.
 - **WebSocket transport** for live message delivery with automatic reconnection and HTTP fallback for the REST API.
-- **Strict runtime validation** on every wire boundary — every server response is parsed through a Zod schema before any logic touches it.
 
 ## Install
 

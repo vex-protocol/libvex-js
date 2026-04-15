@@ -13,8 +13,16 @@ import { XUtils } from "@vex-chat/crypto";
 
 export class NodeKeyStore implements KeyStore {
     private readonly dir: string;
+    private readonly passphrase: string;
 
-    constructor(dir: string = ".") {
+    constructor(passphrase: string, dir: string = ".") {
+        if (!passphrase) {
+            throw new Error(
+                "NodeKeyStore requires a non-empty passphrase. " +
+                    "The caller must supply a passphrase sourced from user input, OS keychain, or similar.",
+            );
+        }
+        this.passphrase = passphrase;
         this.dir = dir;
     }
 
@@ -54,7 +62,7 @@ export class NodeKeyStore implements KeyStore {
 
     save(creds: StoredCredentials): Promise<void> {
         const data = JSON.stringify(creds);
-        const encrypted = XUtils.encryptKeyData("", data);
+        const encrypted = XUtils.encryptKeyData(this.passphrase, data);
         fs.writeFileSync(this.filePath(creds.username), encrypted);
         return Promise.resolve();
     }
@@ -66,7 +74,10 @@ export class NodeKeyStore implements KeyStore {
     private readFile(filePath: string): null | StoredCredentials {
         try {
             const data = fs.readFileSync(filePath);
-            const decrypted = XUtils.decryptKeyData(new Uint8Array(data), "");
+            const decrypted = XUtils.decryptKeyData(
+                new Uint8Array(data),
+                this.passphrase,
+            );
             const parsed: unknown = JSON.parse(decrypted);
             if (isStoredCredentials(parsed)) {
                 return parsed;

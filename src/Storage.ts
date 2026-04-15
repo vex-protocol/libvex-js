@@ -24,7 +24,7 @@ export interface Storage extends EventEmitter {
     /**
      * Deletes history for a direct conversation or group channel.
      *
-     * @param channelOrUserID Channel ID or user ID whose history should be deleted.
+     * @param channelOrUserID - Channel ID or user ID whose history should be deleted.
      */
     deleteHistory: (channelOrUserID: string) => Promise<void>;
     /** Deletes one message by `mailID`. */
@@ -108,8 +108,8 @@ export interface Storage extends EventEmitter {
     /**
      * Saves signed prekeys.
      *
-     * @param preKeys Prekeys to persist.
-     * @param oneTime `true` for one-time keys, `false` for the long-lived signed prekey.
+     * @param preKeys - Prekeys to persist.
+     * @param oneTime - `true` for one-time keys, `false` for the long-lived signed prekey.
      */
     savePreKeys: (
         preKeys: UnsavedPreKey[],
