@@ -23,9 +23,11 @@ export function platformSuite(
 
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
+            const override = apiUrlOverrideFromEnv();
+
             const opts: ClientOptions = {
                 inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
+                ...override,
             };
             const storage = await makeStorage(SK, opts);
             client = await Client.create(SK, opts, storage);
