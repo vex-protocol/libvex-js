@@ -23,7 +23,6 @@ export function platformSuite(
 
         beforeAll(async () => {
             const SK = Client.generateSecretKey();
-            const override = apiUrlOverrideFromEnv();
 
             const opts: ClientOptions = {
                 inMemoryDb: true,
