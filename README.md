@@ -13,7 +13,7 @@
 
 Reference TypeScript client for the [Vex](https://vex.wtf) encrypted chat platform. Builds against the wire protocol defined in [@vex-chat/types](https://github.com/vex-protocol/types-js) and the cryptographic primitives in [@vex-chat/crypto](https://github.com/vex-protocol/crypto-js). Use it to build a chat client, a bot, or any application that needs to talk to a [spire](https://github.com/vex-protocol/spire) server.
 
-[Documentation](https://vex-chat.github.io/libvex-js/)
+[Documentation](https://vex-protocol.github.io/libvex-js/)
 
 ## What's in the box
 
@@ -22,7 +22,7 @@ The client implements an X3DH-style handshake (X25519 DH + KDF), XSalsa20-Poly13
 - **End-to-end encrypted messaging** with X3DH key agreement — sessions, prekeys, and one-time keys handled internally.
 - **Tree-shakable subpath exports** for platform-specific code: `./preset/node`, `./preset/test`, `./storage/node`, `./storage/sqlite`, `./storage/schema`, `./keystore/node`, `./keystore/memory`. Browser bundles never pull in `better-sqlite3` or other native modules.
 - **Pluggable storage backend** via Kysely so node consumers can use SQLite and browser/tauri/expo consumers can wire their own.
-- **Pluggable key store** so secrets can live in memory (tests), the OS keychain (`./keystore/node`), or wherever the embedding app keeps them.
+- **Pluggable key store** so secrets can live in memory (tests), passphrase-encrypted files on disk (`./keystore/node`), or wherever the embedding app keeps them.
 - **WebSocket transport** for live message delivery with automatic reconnection and HTTP fallback for the REST API.
 
 ## Install
@@ -31,7 +31,7 @@ The client implements an X3DH-style handshake (X25519 DH + KDF), XSalsa20-Poly13
 npm install @vex-chat/libvex
 ```
 
-`@vex-chat/types`, `@vex-chat/crypto`, `axios`, `kysely`, `winston`, and `zod` are required runtime dependencies and install automatically.
+`@vex-chat/types`, `@vex-chat/crypto`, `axios`, `eventemitter3`, `kysely`, `msgpackr`, `uuid`, and `zod` are required runtime dependencies and install automatically.
 
 `better-sqlite3` is an **optional peer dependency** — install it explicitly only if you plan to use the SQLite storage backend on Node:
 
@@ -46,17 +46,20 @@ Browser, Tauri, and Expo consumers should leave `better-sqlite3` out and supply 
 ```ts
 import { Client } from "@vex-chat/libvex";
 
-// Generate or load a long-lived secret key — store it in the OS keychain.
+// Generate or load a long-lived secret key.
 const secretKey = Client.generateSecretKey();
 
 const client = await Client.create(secretKey);
 
 // First-time devices must register before logging in.
-await client.register(Client.randomUsername());
-await client.login();
+await client.register("myUsername", "myPassword");
+await client.login("myUsername", "myPassword");
 
-client.on("authed", async () => {
-    const me = await client.users.me();
+// connect() authenticates the WebSocket and fires "ready" when done.
+await client.connect();
+
+client.on("ready", async () => {
+    const me = client.me.user();
     await client.messages.send(me.userID, "Hello world!");
 });
 
@@ -70,27 +73,19 @@ client.on("message", (message) => {
 libvex ships per-platform "presets" that wire together the appropriate storage and keystore:
 
 ```ts
-// Node — sqlite storage + OS keychain
-import {
-    Client,
-    makeStorage,
-    BootstrapConfig,
-} from "@vex-chat/libvex/preset/node";
+// Node — sqlite storage + encrypted file keystore
+import { nodePreset } from "@vex-chat/libvex/preset/node";
 
-// Tests / ephemeral — in-memory storage + memory keystore
-import {
-    Client,
-    makeStorage,
-    BootstrapConfig,
-} from "@vex-chat/libvex/preset/test";
+// Tests / ephemeral — in-memory storage, no persistence
+import { testPreset } from "@vex-chat/libvex/preset/test";
 ```
 
-For a custom platform (browser, tauri, expo), import `Client` from `@vex-chat/libvex` directly and supply your own `Storage` (implementing the schema in `@vex-chat/libvex/storage/schema`) and `KeyStore` to `Client.create`.
+Presets return a `PlatformPreset` with a `createStorage()` factory and a `deviceName`. For a custom platform (browser, tauri, expo), import `Client` from `@vex-chat/libvex` directly and supply your own `Storage` (implementing the schema in `@vex-chat/libvex/storage/schema`) and `KeyStore` to `Client.create`.
 
 ## Development
 
 ```sh
-npm run build           # tsc -p tsconfig.build.json
+npm run build           # rimraf dist && tsc -p tsconfig.build.json
 npm run lint            # eslint
 npm run lint:fix        # eslint --fix
 npm run format          # prettier --write
@@ -105,7 +100,7 @@ npm run license:check   # license allowlist gate
 npm run docs            # typedoc — writes ./docs
 ```
 
-The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm run test:e2e`) spins up a real spire server in a separate process — point `VEX_API_URL` at a running spire if you want to test against a different host.
+The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm run test:e2e`) requires a running spire server — set `VEX_API_URL` to point at it (defaults to `localhost`).
 
 See [AGENTS.md](./AGENTS.md) for the release flow (changesets → publish) and the rules for writing changesets.
 
