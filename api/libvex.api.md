@@ -72,7 +72,6 @@ export class Client {
     users: Users;
     whoami(): Promise<{
         exp: number;
-        token: string;
         user: User;
     }>;
 }

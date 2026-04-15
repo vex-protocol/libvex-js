@@ -5,8 +5,8 @@ import vitest from "@vitest/eslint-plugin";
 
 export default tseslint.config(
     ...tseslint.configs.strictTypeChecked,
-    perfectionist.configs["recommended-natural"],
     {
+        plugins: { perfectionist },
         languageOptions: {
             parserOptions: {
                 projectService: true,
