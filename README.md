@@ -10,7 +10,7 @@
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/vex-protocol/libvex-js?style=flat-square&label=Scorecard)](https://securityscorecards.dev/viewer/?uri=github.com/vex-protocol/libvex-js)
 [![Socket](https://socket.dev/api/badge/npm/package/@vex-chat/libvex)](https://socket.dev/npm/package/@vex-chat/libvex)
 
-Reference TypeScript client for the [Vex](https://vex.wtf) encrypted chat platform. Builds against the wire protocol defined in [@vex-chat/types](https://github.com/vex-protocol/types-js) and the cryptographic primitives in [@vex-chat/crypto](https://github.com/vex-protocol/crypto-js). Use it to build a chat client, a bot, or any application that needs to talk to a [spire](https://github.com/vex-protocol/spire) server.
+Reference TypeScript client for the [Vex](https://vex.wtf) protocol. Use it to build a chat client, a bot, or between two clients that need encrypted comms via [spire](https://github.com/vex-protocol/spire) server.
 
 [Documentation](https://vex-protocol.github.io/libvex-js/)
 
@@ -22,7 +22,6 @@ The client implements an X3DH-style handshake (X25519 DH + KDF), XSalsa20-Poly13
 - **Tree-shakable subpath exports** for platform-specific code: `./preset/node`, `./preset/test`, `./storage/node`, `./storage/sqlite`, `./storage/schema`, `./keystore/node`, `./keystore/memory`. Browser bundles never pull in `better-sqlite3` or other native modules.
 - **Pluggable storage backend** via Kysely so node consumers can use SQLite and browser/tauri/expo consumers can wire their own.
 - **Pluggable key store** so secrets can live in memory (tests), passphrase-encrypted files on disk (`./keystore/node`), or wherever the embedding app keeps them.
-- **WebSocket transport** for live message delivery with automatic reconnection and HTTP fallback for the REST API.
 
 ## Install
 
