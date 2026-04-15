@@ -12,7 +12,7 @@
 
 Reference TypeScript client for the [Vex](https://vex.wtf) protocol. Use it to build a chat client, a bot, or between two clients that need encrypted comms via [spire](https://github.com/vex-protocol/spire) server.
 
-[Documentation](https://vex-protocol.github.io/libvex-js/)
+[Documentation](https://lib.vex.wtf/)
 
 ## What's in the box
 
