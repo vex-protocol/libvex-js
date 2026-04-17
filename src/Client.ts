@@ -1779,11 +1779,10 @@ export class Client {
 
         const msgBytes = Uint8Array.from(msgpack.encode(copy));
 
-        const devices = await this.getUserDeviceList(this.getUser().userID);
-
-        if (!devices) {
-            throw new Error("Couldn't get own devices.");
-        }
+        const devices = await this.fetchUserDeviceListWithBackoff(
+            this.getUser().userID,
+            "own",
+        );
         const promises = [];
         for (const device of devices) {
             if (device.deviceID !== this.getDevice().deviceID) {
@@ -2034,20 +2033,69 @@ export class Client {
         return this.user;
     }
 
+    private deviceListFailureDetail(err: unknown): string {
+        if (!isAxiosError(err)) {
+            return "";
+        }
+        const st = err.response?.status;
+        if (typeof st === "number") {
+            return ` (HTTP ${String(st)})`;
+        }
+        if (err.code !== undefined) {
+            return ` (${err.code})`;
+        }
+        return "";
+    }
+
+    /**
+     * Single GET for `/user/:id/devices`. On failure returns `null` (swallows errors)
+     * — callers that need reliability should use {@link fetchUserDeviceListWithBackoff}.
+     * Similar “best effort null” patterns elsewhere: {@link getChannelByID},
+     * {@link getDeviceByID} (HTTP leg), {@link getToken}, emoji upload fallbacks.
+     */
     private async getUserDeviceList(userID: string): Promise<Device[] | null> {
         try {
-            const res = await this.http.get(
-                this.getHost() + "/user/" + userID + "/devices",
-            );
-            const devices = decodeAxios(DeviceArrayCodec, res.data);
-            for (const device of devices) {
-                this.deviceRecords[device.deviceID] = device;
-            }
-
-            return devices;
+            return await this.fetchUserDeviceListOnce(userID);
         } catch (_err: unknown) {
             return null;
         }
+    }
+
+    private async fetchUserDeviceListOnce(userID: string): Promise<Device[]> {
+        const res = await this.http.get(
+            this.getHost() + "/user/" + userID + "/devices",
+        );
+        const devices = decodeAxios(DeviceArrayCodec, res.data);
+        for (const device of devices) {
+            this.deviceRecords[device.deviceID] = device;
+        }
+        return devices;
+    }
+
+    /**
+     * DM / forward paths need the peer’s (or self) device rows under load: bounded
+     * retries with exponential backoff (same shape as session pubkey hydration).
+     */
+    private async fetchUserDeviceListWithBackoff(
+        userID: string,
+        label: "peer" | "own",
+    ): Promise<Device[]> {
+        const base =
+            label === "own"
+                ? "Couldn't get own devices"
+                : "Couldn't get device list";
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            if (attempt > 0) {
+                await sleep(100 * 2 ** (attempt - 1));
+            }
+            try {
+                return await this.fetchUserDeviceListOnce(userID);
+            } catch (err: unknown) {
+                lastErr = err;
+            }
+        }
+        throw new Error(`${base}${this.deviceListFailureDetail(lastErr)}`);
     }
 
     private async getUserList(channelID: string): Promise<User[]> {
@@ -2920,17 +2968,10 @@ export class Client {
                 throw new Error("Couldn't get user entry.");
             }
 
-            let deviceList = await this.getUserDeviceList(userID);
-            if (!deviceList) {
-                let retries = 0;
-                while (!deviceList) {
-                    deviceList = await this.getUserDeviceList(userID);
-                    retries++;
-                    if (retries > 3) {
-                        throw new Error("Couldn't get device list.");
-                    }
-                }
-            }
+            const deviceList = await this.fetchUserDeviceListWithBackoff(
+                userID,
+                "peer",
+            );
             const mailID = uuid.v4();
             const promises: Array<Promise<void>> = [];
             for (const device of deviceList) {
