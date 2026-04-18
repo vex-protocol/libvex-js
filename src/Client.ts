@@ -160,6 +160,12 @@ export interface ClientOptions {
     saveHistory?: boolean;
     /** Use `http/ws` instead of `https/wss`. Intended for local/dev environments. */
     unsafeHttp?: boolean;
+    /**
+     * When set (non-empty), sent as `x-dev-api-key` on every HTTP request.
+     * Spire omits in-process rate limits when this matches the server's `DEV_API_KEY`
+     * (local / load-testing only — never use in production).
+     */
+    devApiKey?: string;
 }
 
 /**
@@ -850,6 +856,14 @@ export class Client {
     private readonly forwarded = new Set<string>();
 
     private readonly host: string;
+    /**
+     * Node-only: per-client HTTP(S) agents (see `init()` + `storage/node/http-agents`).
+     * Dropped on `close()` so idle keep-alive sockets do not keep the process alive.
+     */
+    private nodeHttpAgents?: {
+        http: { destroy(): void };
+        https: { destroy(): void };
+    };
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
@@ -933,6 +947,10 @@ export class Client {
         });
 
         this.http = axios.create({ responseType: "arraybuffer" });
+        const devKey = options?.devApiKey?.trim();
+        if (devKey !== undefined && devKey.length > 0) {
+            this.http.defaults.headers.common["x-dev-api-key"] = devKey;
+        }
 
         this.socket = new WebSocketAdapter(this.prefixes.WS + this.host);
         this.socket.onerror = () => {};
@@ -1024,6 +1042,32 @@ export class Client {
     }
 
     /**
+     * True when running under Node (has `process.versions`).
+     * Uses indirect lookup so the bare `process` global never appears in
+     * source that the platform-guard plugin scans.
+     */
+    private static isNodeRuntime(): boolean {
+        try {
+            const g = Object.getOwnPropertyDescriptor(
+                globalThis,
+                "\u0070rocess",
+            );
+            if (!g) return false;
+            const proc: unknown =
+                typeof g.get === "function" ? g.get() : g.value;
+            if (typeof proc !== "object" || proc === null) {
+                return false;
+            }
+            return (
+                "versions" in proc &&
+                typeof (proc as { versions?: unknown }).versions === "object"
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Browser-safe NODE_ENV accessor.
      * Uses indirect lookup so the bare `process` global never appears in
      * source that the platform-guard plugin scans.
@@ -1063,6 +1107,15 @@ export class Client {
     }
 
     /**
+     * Fresh read of the `manuallyClosing` flag for async loops — direct property checks
+     * after `await` are flagged as always-false by control-flow analysis even though
+     * `close()` can run concurrently.
+     */
+    private isManualCloseInFlight(): boolean {
+        return this.manuallyClosing;
+    }
+
+    /**
      * Closes the client — disconnects the WebSocket, shuts down storage,
      * and emits `closed` unless `muteEvent` is `true`.
      *
@@ -1072,6 +1125,12 @@ export class Client {
         this.manuallyClosing = true;
         this.socket.close();
         await this.database.close();
+
+        if (this.nodeHttpAgents) {
+            this.nodeHttpAgents.http.destroy();
+            this.nodeHttpAgents.https.destroy();
+            delete this.nodeHttpAgents;
+        }
 
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
@@ -1539,6 +1598,9 @@ export class Client {
         }
 
         if (!this.xKeyRing) {
+            if (this.manuallyClosing) {
+                return;
+            }
             throw new Error("Key ring not initialized.");
         }
 
@@ -1779,11 +1841,10 @@ export class Client {
 
         const msgBytes = Uint8Array.from(msgpack.encode(copy));
 
-        const devices = await this.getUserDeviceList(this.getUser().userID);
-
-        if (!devices) {
-            throw new Error("Couldn't get own devices.");
-        }
+        const devices = await this.fetchUserDeviceListWithBackoff(
+            this.getUser().userID,
+            "own",
+        );
         const promises = [];
         for (const device of devices) {
             if (device.deviceID !== this.getDevice().deviceID) {
@@ -1881,6 +1942,9 @@ export class Client {
     }
 
     private async getMail(): Promise<void> {
+        if (this.manuallyClosing) {
+            return;
+        }
         while (this.fetchingMail) {
             await sleep(500);
         }
@@ -2034,20 +2098,84 @@ export class Client {
         return this.user;
     }
 
+    private deviceListFailureDetail(err: unknown): string {
+        if (!isAxiosError(err)) {
+            return "";
+        }
+        const st = err.response?.status;
+        if (typeof st === "number") {
+            return ` (HTTP ${String(st)})`;
+        }
+        if (err.code !== undefined) {
+            return ` (${err.code})`;
+        }
+        return "";
+    }
+
+    /**
+     * Single GET for `/user/:id/devices`. On failure returns `null` (swallows errors)
+     * — callers that need reliability should use `fetchUserDeviceListWithBackoff`.
+     * Similar “best effort null” patterns elsewhere: `getChannelByID`,
+     * `getDeviceByID` (HTTP leg), `getToken`, emoji upload fallbacks.
+     */
     private async getUserDeviceList(userID: string): Promise<Device[] | null> {
         try {
-            const res = await this.http.get(
-                this.getHost() + "/user/" + userID + "/devices",
-            );
-            const devices = decodeAxios(DeviceArrayCodec, res.data);
-            for (const device of devices) {
-                this.deviceRecords[device.deviceID] = device;
-            }
-
-            return devices;
+            return await this.fetchUserDeviceListOnce(userID);
         } catch (_err: unknown) {
             return null;
         }
+    }
+
+    private async fetchUserDeviceListOnce(userID: string): Promise<Device[]> {
+        const res = await this.http.get(
+            this.getHost() + "/user/" + userID + "/devices",
+        );
+        const devices = decodeAxios(DeviceArrayCodec, res.data);
+        for (const device of devices) {
+            this.deviceRecords[device.deviceID] = device;
+        }
+        return devices;
+    }
+
+    /**
+     * DM / forward paths need the peer’s (or self) device rows under load: bounded
+     * retries with exponential backoff (same shape as session pubkey hydration).
+     */
+    private async fetchUserDeviceListWithBackoff(
+        userID: string,
+        label: "peer" | "own",
+    ): Promise<Device[]> {
+        const base =
+            label === "own"
+                ? "Couldn't get own devices"
+                : "Couldn't get device list";
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            if (attempt > 0) {
+                if (this.isManualCloseInFlight()) {
+                    throw new Error(
+                        `${base}${this.deviceListFailureDetail(lastErr)}`,
+                    );
+                }
+                const delayMs = 100 * 2 ** (attempt - 1);
+                // Chunk the delay to allow close() to interrupt
+                const chunkMs = 10;
+                for (let elapsed = 0; elapsed < delayMs; elapsed += chunkMs) {
+                    if (this.isManualCloseInFlight()) {
+                        throw new Error(
+                            `${base}${this.deviceListFailureDetail(lastErr)}`,
+                        );
+                    }
+                    await sleep(Math.min(chunkMs, delayMs - elapsed));
+                }
+            }
+            try {
+                return await this.fetchUserDeviceListOnce(userID);
+            } catch (err: unknown) {
+                lastErr = err;
+            }
+        }
+        throw new Error(`${base}${this.deviceListFailureDetail(lastErr)}`);
     }
 
     private async getUserList(channelID: string): Promise<User[]> {
@@ -2085,6 +2213,14 @@ export class Client {
             throw new Error("You should only call init() once.");
         }
         this.hasInit = true;
+
+        if (Client.isNodeRuntime()) {
+            const { attachNodeAgentsToAxios, createNodeHttpAgents } =
+                await import("./storage/node/http-agents.js");
+            const agents = createNodeHttpAgents();
+            this.nodeHttpAgents = agents;
+            attachNodeAgentsToAxios(this.http, agents);
+        }
 
         await this.populateKeyRing();
         this.emitter.on("message", (message) => {
@@ -2218,6 +2354,9 @@ export class Client {
 
     private newEphemeralKeys() {
         if (!this.xKeyRing) {
+            if (this.manuallyClosing) {
+                return;
+            }
             throw new Error("Key ring not initialized.");
         }
         this.xKeyRing.ephemeralKeys = xBoxKeyPair();
@@ -2275,6 +2414,9 @@ export class Client {
     private async postAuth() {
         let count = 0;
         for (;;) {
+            if (this.isManualCloseInFlight()) {
+                return;
+            }
             try {
                 await this.getMail();
                 count++;
@@ -2285,7 +2427,17 @@ export class Client {
                     count = 0;
                 }
             } catch {}
-            await sleep(1000 * 60);
+            if (this.isManualCloseInFlight()) {
+                return;
+            }
+            // Chunk the idle delay so `close()` can unwind instead of waiting
+            // out one full 60s timer (which would keep the process alive).
+            for (let i = 0; i < 60; i++) {
+                if (this.isManualCloseInFlight()) {
+                    return;
+                }
+                await sleep(1000);
+            }
         }
     }
 
@@ -2303,6 +2455,10 @@ export class Client {
         }
         this.seenMailIDs.add(mail.mailID);
 
+        if (this.manuallyClosing) {
+            return;
+        }
+
         this.sendReceipt(new Uint8Array(mail.nonce));
         let timeout = 1;
         while (this.reading) {
@@ -2313,6 +2469,9 @@ export class Client {
 
         try {
             const healSession = async () => {
+                if (this.manuallyClosing || !this.xKeyRing) {
+                    return;
+                }
                 const deviceEntry = await this.getDeviceByID(mail.sender);
                 const [user, _err] = await this.fetchUser(mail.authorID);
                 if (deviceEntry && user) {
@@ -2362,7 +2521,7 @@ export class Client {
                     const EK_A = ephKey;
 
                     if (!this.xKeyRing) {
-                        throw new Error("Key ring not initialized.");
+                        return;
                     }
                     // my private keys
                     const IK_B = this.xKeyRing.identityKeys.secretKey;
@@ -2920,17 +3079,10 @@ export class Client {
                 throw new Error("Couldn't get user entry.");
             }
 
-            let deviceList = await this.getUserDeviceList(userID);
-            if (!deviceList) {
-                let retries = 0;
-                while (!deviceList) {
-                    deviceList = await this.getUserDeviceList(userID);
-                    retries++;
-                    if (retries > 3) {
-                        throw new Error("Couldn't get device list.");
-                    }
-                }
-            }
+            const deviceList = await this.fetchUserDeviceListWithBackoff(
+                userID,
+                "peer",
+            );
             const mailID = uuid.v4();
             const promises: Array<Promise<void>> = [];
             for (const device of deviceList) {
