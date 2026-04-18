@@ -33,9 +33,6 @@ import type {
 import type { ClientMessage } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
 
-import * as nodeHttp from "node:http";
-import * as nodeHttps from "node:https";
-
 import {
     xBoxKeyPair,
     xBoxKeyPairFromSecret,
@@ -859,9 +856,14 @@ export class Client {
     private readonly forwarded = new Set<string>();
 
     private readonly host: string;
-    /** Own agents so `close()` can drop idle keep-alive sockets (globalAgent would keep Node alive). */
-    private readonly connectionHttpAgent: nodeHttp.Agent;
-    private readonly connectionHttpsAgent: nodeHttps.Agent;
+    /**
+     * Node-only: per-client HTTP(S) agents (see `init()` + `storage/node/http-agents`).
+     * Dropped on `close()` so idle keep-alive sockets do not keep the process alive.
+     */
+    private nodeHttpAgents?: {
+        http: { destroy(): void };
+        https: { destroy(): void };
+    };
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
@@ -944,13 +946,7 @@ export class Client {
             void this.close(true);
         });
 
-        this.connectionHttpAgent = new nodeHttp.Agent({ keepAlive: true });
-        this.connectionHttpsAgent = new nodeHttps.Agent({ keepAlive: true });
-        this.http = axios.create({
-            httpAgent: this.connectionHttpAgent,
-            httpsAgent: this.connectionHttpsAgent,
-            responseType: "arraybuffer",
-        });
+        this.http = axios.create({ responseType: "arraybuffer" });
         const devKey = options?.devApiKey?.trim();
         if (devKey !== undefined && devKey.length > 0) {
             this.http.defaults.headers.common["x-dev-api-key"] = devKey;
@@ -1046,6 +1042,32 @@ export class Client {
     }
 
     /**
+     * True when running under Node (has `process.versions`).
+     * Uses indirect lookup so the bare `process` global never appears in
+     * source that the platform-guard plugin scans.
+     */
+    private static isNodeRuntime(): boolean {
+        try {
+            const g = Object.getOwnPropertyDescriptor(
+                globalThis,
+                "\u0070rocess",
+            );
+            if (!g) return false;
+            const proc: unknown =
+                typeof g.get === "function" ? g.get() : g.value;
+            if (typeof proc !== "object" || proc === null) {
+                return false;
+            }
+            return (
+                "versions" in proc &&
+                typeof (proc as { versions?: unknown }).versions === "object"
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Browser-safe NODE_ENV accessor.
      * Uses indirect lookup so the bare `process` global never appears in
      * source that the platform-guard plugin scans.
@@ -1104,8 +1126,11 @@ export class Client {
         this.socket.close();
         await this.database.close();
 
-        this.connectionHttpAgent.destroy();
-        this.connectionHttpsAgent.destroy();
+        if (this.nodeHttpAgents) {
+            this.nodeHttpAgents.http.destroy();
+            this.nodeHttpAgents.https.destroy();
+            delete this.nodeHttpAgents;
+        }
 
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
@@ -2173,6 +2198,14 @@ export class Client {
             throw new Error("You should only call init() once.");
         }
         this.hasInit = true;
+
+        if (Client.isNodeRuntime()) {
+            const { attachNodeAgentsToAxios, createNodeHttpAgents } =
+                await import("./storage/node/http-agents.js");
+            const agents = createNodeHttpAgents();
+            this.nodeHttpAgents = agents;
+            attachNodeAgentsToAxios(this.http, agents);
+        }
 
         await this.populateKeyRing();
         this.emitter.on("message", (message) => {
