@@ -2152,7 +2152,18 @@ export class Client {
         let lastErr: unknown;
         for (let attempt = 0; attempt < 5; attempt++) {
             if (attempt > 0) {
-                await sleep(100 * 2 ** (attempt - 1));
+                if (this.isManualCloseInFlight()) {
+                    throw new Error(`${base}${this.deviceListFailureDetail(lastErr)}`);
+                }
+                const delayMs = 100 * 2 ** (attempt - 1);
+                // Chunk the delay to allow close() to interrupt
+                const chunkMs = 10;
+                for (let elapsed = 0; elapsed < delayMs; elapsed += chunkMs) {
+                    if (this.isManualCloseInFlight()) {
+                        throw new Error(`${base}${this.deviceListFailureDetail(lastErr)}`);
+                    }
+                    await sleep(Math.min(chunkMs, delayMs - elapsed));
+                }
             }
             try {
                 return await this.fetchUserDeviceListOnce(userID);
