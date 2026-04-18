@@ -1085,7 +1085,7 @@ export class Client {
     }
 
     /**
-     * Fresh read of {@link manuallyClosing} for async loops — direct property checks
+     * Fresh read of the `manuallyClosing` flag for async loops — direct property checks
      * after `await` are flagged as always-false by control-flow analysis even though
      * `close()` can run concurrently.
      */
@@ -2089,9 +2089,9 @@ export class Client {
 
     /**
      * Single GET for `/user/:id/devices`. On failure returns `null` (swallows errors)
-     * — callers that need reliability should use {@link fetchUserDeviceListWithBackoff}.
-     * Similar “best effort null” patterns elsewhere: {@link getChannelByID},
-     * {@link getDeviceByID} (HTTP leg), {@link getToken}, emoji upload fallbacks.
+     * — callers that need reliability should use `fetchUserDeviceListWithBackoff`.
+     * Similar “best effort null” patterns elsewhere: `getChannelByID`,
+     * `getDeviceByID` (HTTP leg), `getToken`, emoji upload fallbacks.
      */
     private async getUserDeviceList(userID: string): Promise<Device[] | null> {
         try {

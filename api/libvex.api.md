@@ -92,6 +92,7 @@ export interface ClientEvents {
 // @public
 export interface ClientOptions {
     dbFolder?: string;
+    devApiKey?: string;
     deviceName?: string;
     host?: string;
     inMemoryDb?: boolean;
