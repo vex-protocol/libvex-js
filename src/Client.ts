@@ -33,6 +33,9 @@ import type {
 import type { ClientMessage } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
 
+import * as nodeHttp from "node:http";
+import * as nodeHttps from "node:https";
+
 import {
     xBoxKeyPair,
     xBoxKeyPairFromSecret,
@@ -160,6 +163,12 @@ export interface ClientOptions {
     saveHistory?: boolean;
     /** Use `http/ws` instead of `https/wss`. Intended for local/dev environments. */
     unsafeHttp?: boolean;
+    /**
+     * When set (non-empty), sent as `x-dev-api-key` on every HTTP request.
+     * Spire omits in-process rate limits when this matches the server's `DEV_API_KEY`
+     * (local / load-testing only — never use in production).
+     */
+    devApiKey?: string;
 }
 
 /**
@@ -850,6 +859,9 @@ export class Client {
     private readonly forwarded = new Set<string>();
 
     private readonly host: string;
+    /** Own agents so `close()` can drop idle keep-alive sockets (globalAgent would keep Node alive). */
+    private readonly connectionHttpAgent: nodeHttp.Agent;
+    private readonly connectionHttpsAgent: nodeHttps.Agent;
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
@@ -932,7 +944,17 @@ export class Client {
             void this.close(true);
         });
 
-        this.http = axios.create({ responseType: "arraybuffer" });
+        this.connectionHttpAgent = new nodeHttp.Agent({ keepAlive: true });
+        this.connectionHttpsAgent = new nodeHttps.Agent({ keepAlive: true });
+        this.http = axios.create({
+            httpAgent: this.connectionHttpAgent,
+            httpsAgent: this.connectionHttpsAgent,
+            responseType: "arraybuffer",
+        });
+        const devKey = options?.devApiKey?.trim();
+        if (devKey !== undefined && devKey.length > 0) {
+            this.http.defaults.headers.common["x-dev-api-key"] = devKey;
+        }
 
         this.socket = new WebSocketAdapter(this.prefixes.WS + this.host);
         this.socket.onerror = () => {};
@@ -1063,6 +1085,15 @@ export class Client {
     }
 
     /**
+     * Fresh read of {@link manuallyClosing} for async loops — direct property checks
+     * after `await` are flagged as always-false by control-flow analysis even though
+     * `close()` can run concurrently.
+     */
+    private isManualCloseInFlight(): boolean {
+        return this.manuallyClosing;
+    }
+
+    /**
      * Closes the client — disconnects the WebSocket, shuts down storage,
      * and emits `closed` unless `muteEvent` is `true`.
      *
@@ -1072,6 +1103,9 @@ export class Client {
         this.manuallyClosing = true;
         this.socket.close();
         await this.database.close();
+
+        this.connectionHttpAgent.destroy();
+        this.connectionHttpsAgent.destroy();
 
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
@@ -1539,6 +1573,9 @@ export class Client {
         }
 
         if (!this.xKeyRing) {
+            if (this.manuallyClosing) {
+                return;
+            }
             throw new Error("Key ring not initialized.");
         }
 
@@ -1880,6 +1917,9 @@ export class Client {
     }
 
     private async getMail(): Promise<void> {
+        if (this.manuallyClosing) {
+            return;
+        }
         while (this.fetchingMail) {
             await sleep(500);
         }
@@ -2266,6 +2306,9 @@ export class Client {
 
     private newEphemeralKeys() {
         if (!this.xKeyRing) {
+            if (this.manuallyClosing) {
+                return;
+            }
             throw new Error("Key ring not initialized.");
         }
         this.xKeyRing.ephemeralKeys = xBoxKeyPair();
@@ -2323,6 +2366,9 @@ export class Client {
     private async postAuth() {
         let count = 0;
         for (;;) {
+            if (this.isManualCloseInFlight()) {
+                return;
+            }
             try {
                 await this.getMail();
                 count++;
@@ -2333,7 +2379,17 @@ export class Client {
                     count = 0;
                 }
             } catch {}
-            await sleep(1000 * 60);
+            if (this.isManualCloseInFlight()) {
+                return;
+            }
+            // Chunk the idle delay so `close()` can unwind instead of waiting
+            // out one full 60s timer (which would keep the process alive).
+            for (let i = 0; i < 60; i++) {
+                if (this.isManualCloseInFlight()) {
+                    return;
+                }
+                await sleep(1000);
+            }
         }
     }
 
@@ -2351,6 +2407,10 @@ export class Client {
         }
         this.seenMailIDs.add(mail.mailID);
 
+        if (this.manuallyClosing) {
+            return;
+        }
+
         this.sendReceipt(new Uint8Array(mail.nonce));
         let timeout = 1;
         while (this.reading) {
@@ -2361,6 +2421,9 @@ export class Client {
 
         try {
             const healSession = async () => {
+                if (this.manuallyClosing || !this.xKeyRing) {
+                    return;
+                }
                 const deviceEntry = await this.getDeviceByID(mail.sender);
                 const [user, _err] = await this.fetchUser(mail.authorID);
                 if (deviceEntry && user) {
@@ -2410,7 +2473,7 @@ export class Client {
                     const EK_A = ephKey;
 
                     if (!this.xKeyRing) {
-                        throw new Error("Key ring not initialized.");
+                        return;
                     }
                     // my private keys
                     const IK_B = this.xKeyRing.identityKeys.secretKey;
