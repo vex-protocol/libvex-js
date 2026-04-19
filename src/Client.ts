@@ -864,6 +864,8 @@ export class Client {
         http: { destroy(): void };
         https: { destroy(): void };
     };
+    /** Cancels in-flight axios work on `close()` so `postAuth`/`getMail` cannot hang forever. */
+    private readonly httpAbortController = new AbortController();
     private readonly http: AxiosInstance;
     private readonly idKeys: KeyPair | null;
     private isAlive: boolean = true;
@@ -946,7 +948,10 @@ export class Client {
             void this.close(true);
         });
 
-        this.http = axios.create({ responseType: "arraybuffer" });
+        this.http = axios.create({
+            responseType: "arraybuffer",
+            signal: this.httpAbortController.signal,
+        });
         const devKey = options?.devApiKey?.trim();
         if (devKey !== undefined && devKey.length > 0) {
             this.http.defaults.headers.common["x-dev-api-key"] = devKey;
@@ -1123,6 +1128,7 @@ export class Client {
      */
     public async close(muteEvent = false): Promise<void> {
         this.manuallyClosing = true;
+        this.httpAbortController.abort();
         this.socket.close();
         await this.database.close();
 
@@ -1827,6 +1833,10 @@ export class Client {
     }
 
     private async forward(message: Message) {
+        if (this.isManualCloseInFlight()) {
+            return;
+        }
+
         const copy = { ...message };
 
         if (this.forwarded.has(copy.mailID)) {
@@ -2127,6 +2137,9 @@ export class Client {
     }
 
     private async fetchUserDeviceListOnce(userID: string): Promise<Device[]> {
+        if (this.isManualCloseInFlight()) {
+            return [];
+        }
         const res = await this.http.get(
             this.getHost() + "/user/" + userID + "/devices",
         );
@@ -2151,20 +2164,16 @@ export class Client {
                 : "Couldn't get device list";
         let lastErr: unknown;
         for (let attempt = 0; attempt < 5; attempt++) {
+            if (this.isManualCloseInFlight()) {
+                return [];
+            }
             if (attempt > 0) {
-                if (this.isManualCloseInFlight()) {
-                    throw new Error(
-                        `${base}${this.deviceListFailureDetail(lastErr)}`,
-                    );
-                }
                 const delayMs = 100 * 2 ** (attempt - 1);
-                // Chunk the delay to allow close() to interrupt
+                // Chunk the delay so close() can finish before we retry HTTP.
                 const chunkMs = 10;
                 for (let elapsed = 0; elapsed < delayMs; elapsed += chunkMs) {
                     if (this.isManualCloseInFlight()) {
-                        throw new Error(
-                            `${base}${this.deviceListFailureDetail(lastErr)}`,
-                        );
+                        return [];
                     }
                     await sleep(Math.min(chunkMs, delayMs - elapsed));
                 }
@@ -2206,6 +2215,28 @@ export class Client {
     }
 
     /**
+     * Pipeline for decrypted messages — registered in `init`. After `close()` sets
+     * `manuallyClosing`, this becomes a no-op so fire-and-forget `forward` does not
+     * race HTTP teardown (we avoid `off()` here — it can interact badly with emit).
+     */
+    private readonly onInternalMessage = (message: Message): void => {
+        if (this.isManualCloseInFlight()) {
+            return;
+        }
+        if (message.direction === "outgoing" && !message.forward) {
+            void this.forward(message);
+        }
+
+        if (
+            message.direction === "incoming" &&
+            message.recipient === message.sender
+        ) {
+            return;
+        }
+        void this.database.saveMessage(message);
+    };
+
+    /**
      * Initializes the keyring. This must be called before anything else.
      */
     private async init(): Promise<void> {
@@ -2223,19 +2254,7 @@ export class Client {
         }
 
         await this.populateKeyRing();
-        this.emitter.on("message", (message) => {
-            if (message.direction === "outgoing" && !message.forward) {
-                void this.forward(message);
-            }
-
-            if (
-                message.direction === "incoming" &&
-                message.recipient === message.sender
-            ) {
-                return;
-            }
-            void this.database.saveMessage(message);
-        });
+        this.emitter.on("message", this.onInternalMessage);
         this.emitter.emit("ready");
     }
 
