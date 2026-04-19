@@ -15,6 +15,8 @@ permissions:
 env:
     npm_config_save_exact: "true"
     npm_config_engine_strict: "true"
+    # Opt into Node 24 for JS actions before the June 2026 default (see GitHub changelog).
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
     # One ubuntu runner: single npm ci, then all static checks + unit tests + library quality.
