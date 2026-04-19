@@ -113,7 +113,7 @@
         "axios": "1.15.0",
         "eventemitter3": "5.0.4",
         "kysely": "0.28.16",
-        "msgpackr": "1.11.8",
+        "msgpackr": "1.11.10",
         "uuid": "13.0.0",
         "zod": "4.3.6"
     },
