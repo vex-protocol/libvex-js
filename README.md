@@ -104,4 +104,4 @@ See [AGENTS.md](./AGENTS.md) for the release flow (changesets → publish) and t
 
 ## License
 
-[AGPL-3.0-or-later](./LICENSE)
+Default public license: **[AGPL-3.0](./LICENSE)** (see `package.json` for SPDX). Commercial licenses from **Vex Heavy Industries LLC**: [**LICENSE-COMMERCIAL**](./LICENSE-COMMERCIAL).

@@ -51,7 +51,8 @@
     "files": [
         "dist",
         "src",
-        "LICENSE"
+        "LICENSE",
+        "LICENSE-COMMERCIAL"
     ],
     "author": "Extra <extrahash@protonmail.com>",
     "license": "AGPL-3.0-or-later",
