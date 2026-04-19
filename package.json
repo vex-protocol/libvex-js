@@ -52,7 +52,9 @@
         "dist",
         "src",
         "LICENSE",
-        "LICENSE-COMMERCIAL"
+        "LICENSE-COMMERCIAL",
+        "LICENSING.md",
+        "CLA.md"
     ],
     "author": "Extra <extrahash@protonmail.com>",
     "license": "AGPL-3.0-or-later",
