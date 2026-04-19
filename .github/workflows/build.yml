@@ -3,6 +3,7 @@ name: Build
 on:
     pull_request:
         branches: [master]
+    workflow_dispatch:
 
 concurrency:
     group: build-${{ github.event.pull_request.number || github.ref }}
@@ -16,193 +17,88 @@ env:
     npm_config_engine_strict: "true"
 
 jobs:
-    # ── Parallel checks ────────────────────────────────────────────────────
-    #
-    # Every job except `e2e-prod` runs on ubuntu-latest only. The
-    # cross-OS coverage lives in `e2e-prod`, which exercises the full
-    # installed-dep path (native better-sqlite3 compilation, kysely's
-    # pathToFileURL migration provider, ESM URL handling on Windows)
-    # against the live production spire. Duplicating the matrix on
-    # `build` and `test` would just triple CI minutes for no additional
-    # signal — if something is broken on Windows, e2e-prod catches it.
+    # One ubuntu runner: single npm ci, then all static checks + unit tests + library quality.
+    # Cross-OS coverage stays in e2e-prod (matrix). Require job "CI" in branch protection;
+    # "CI OK" only reflects e2e-prod (same as before — fork PRs skip e2e).
 
-    build:
-        name: Build
+    checks:
+        name: CI
         runs-on: ubuntu-latest
         steps:
             - name: Harden Runner
               uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
               with:
                   egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci --ignore-scripts
-            - name: tsc
-              run: npm run build
 
-    test:
-        name: Test
-        runs-on: ubuntu-latest
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci
-            - name: Vitest
-              run: npm test
-
-    lint:
-        name: Lint
-        runs-on: ubuntu-latest
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci --ignore-scripts
-            - name: ESLint
-              run: npm run lint
-            - name: Copyright headers
-              run: npm run copyright:check
-            - name: Prettier
-              run: npm run format:check
-            - name: npm-package-json-lint
-              run: npx npm-package-json-lint .
-
-    types:
-        name: Types
-        runs-on: ubuntu-latest
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci --ignore-scripts
-            - name: Type coverage
-              run: npx type-coverage
-
-    library-quality:
-        name: Library Quality
-        runs-on: ubuntu-latest
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci --ignore-scripts
-            - name: Build
-              run: npm run build
-            - name: publint
-              run: npm run lint:pkg
-            - name: arethetypeswrong
-              run: npm run lint:types
-            - name: api-extractor (no public API drift)
-              run: |
-                  npm run lint:api
-                  git diff --exit-code api/
-            - name: typedoc (no doc warnings)
-              run: npx typedoc --options typedoc.json --treatWarningsAsErrors
-
-    supply-chain:
-        name: Supply Chain
-        runs-on: ubuntu-latest
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-              with:
-                  node-version-file: .tool-versions
-                  cache: npm
-            - run: npm ci --ignore-scripts
-            - name: License check
-              run: npm run license:check
-            - name: npm audit
-              run: npm audit --audit-level=high
-            - name: Socket security scan
-              if: github.event.pull_request.head.repo.full_name == github.repository
-              run: npx @socketsecurity/cli@latest ci
-              env:
-                  SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_API_KEY }}
-
-    changeset:
-        name: Changeset
-        runs-on: ubuntu-latest
-        if: github.actor != 'dependabot[bot]' && !startsWith(github.event.pull_request.head.ref, 'changeset-release/')
-        steps:
-            - name: Harden Runner
-              uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
-              with:
-                  egress-policy: audit
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   fetch-depth: 0
                   persist-credentials: false
+
             - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
               with:
                   node-version-file: .tool-versions
                   cache: npm
-            - run: npm ci --ignore-scripts
+
+            - run: npm ci --prefer-offline
+
+            - name: TypeScript build
+              run: npm run build
+
+            - name: Copyright headers
+              run: npm run copyright:check
+
+            - name: ESLint
+              run: npm run lint
+
+            - name: Prettier
+              run: npm run format:check
+
+            - name: npm-package-json-lint
+              run: npx npm-package-json-lint .
+
+            - name: Type coverage
+              run: npx type-coverage
+
+            - name: Vitest (unit)
+              run: npm test
+
+            - name: publint
+              run: npm run lint:pkg
+
+            - name: arethetypeswrong
+              run: npm run lint:types
+
+            - name: api-extractor (no public API drift)
+              run: |
+                  npm run lint:api
+                  git diff --exit-code api/
+
+            - name: typedoc (no doc warnings)
+              run: npx typedoc --options typedoc.json --treatWarningsAsErrors
+
+            - name: License check
+              run: npm run license:check
+
+            - name: npm audit
+              run: npm audit --audit-level=high
+
+            - name: Socket security scan
+              if: github.event.pull_request.head.repo.full_name == github.repository
+              run: npx @socketsecurity/cli ci
+              env:
+                  SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_API_KEY }}
+
             - name: Check for changeset
+              if: github.actor != 'dependabot[bot]' && !startsWith(github.event.pull_request.head.ref, 'changeset-release/')
               run: npx changeset status --since=origin/master
 
-    # ── End-to-end against production ─────────────────────────────────────
-    #
-    # Runs the full e2e suite (node + browser projects) against the live
-    # production spire at api.vex.wtf. Gated on every other check passing
-    # so we don't waste prod cycles on PRs that already failed unit tests
-    # or lint. Same-repo only — fork PRs skip this so strangers can't
-    # spam prod from a CI button.
-
+    # End-to-end (node + browser) against production spire — matrix OS for consumer-facing coverage.
     e2e-prod:
         name: E2E prod (${{ matrix.os }})
         if: github.event.pull_request.head.repo.full_name == github.repository
         needs:
-            - build
-            - test
-            - lint
-            - types
-            - library-quality
-            - supply-chain
-            - changeset
+            - checks
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -217,22 +113,20 @@ jobs:
               uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
               with:
                   egress-policy: audit
+
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   persist-credentials: false
+
             - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
               with:
                   node-version-file: .tool-versions
                   cache: npm
-            - run: npm ci
+
+            - run: npm ci --prefer-offline
+
             - name: Vitest e2e (node + browser) against api.vex.wtf
               run: npm run test:e2e
-
-    # ── Single aggregator — the only required status check ────────────────
-    #
-    # Only depends on e2e-prod because e2e-prod itself transitively
-    # depends on every other job. Keeps the dependency graph linear:
-    # everything → e2e-prod → ci-ok.
 
     ci-ok:
         name: CI OK
@@ -249,5 +143,6 @@ jobs:
                   echo "One or more CI jobs did not succeed:"
                   echo '${{ toJSON(needs) }}'
                   exit 1
+
             - name: All checks passed
               run: echo "All CI jobs succeeded."
