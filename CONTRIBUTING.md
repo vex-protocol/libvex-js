@@ -17,9 +17,12 @@ See [**LICENSING.md**](./LICENSING.md) for the default **AGPL** terms and **comm
 
 ## Copyright headers
 
-New source files under `src/` should include the standard header (see any existing `.ts` file). From the **vex-protocol** workspace root, you can (re)apply headers with:
+New source files under `src/` should include the standard header (see any existing `.ts` file).
 
-`node scripts/add-copyright-headers.mjs libvex-js`
+- **Check (also runs in CI):** `npm run copyright:check`
+- **Apply missing headers:** `npm run copyright:apply`
+
+From the **vex-protocol** monorepo root: `node scripts/add-copyright-headers.mjs` or `… --check`.
 
 ## Development
 

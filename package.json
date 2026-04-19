@@ -68,6 +68,8 @@
         "build": "rimraf dist && tsc -p tsconfig.build.json",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
+        "copyright:check": "node scripts/copyright-headers.mjs --check",
+        "copyright:apply": "node scripts/copyright-headers.mjs",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
         "lint:pkg": "publint --strict",

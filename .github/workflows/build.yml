@@ -82,6 +82,8 @@ jobs:
             - run: npm ci --ignore-scripts
             - name: ESLint
               run: npm run lint
+            - name: Copyright headers
+              run: npm run copyright:check
             - name: Prettier
               run: npm run format:check
             - name: npm-package-json-lint
