@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2020-2026 Vex Heavy Industries LLC
+ * Licensed under AGPL-3.0. See LICENSE for details.
+ * Commercial licenses available at vex.wtf
+ */
+
 export const formatBytes = (bytes: number, decimals = 2) => {
     if (bytes === 0) {
         return "0 Bytes";

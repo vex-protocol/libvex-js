@@ -102,6 +102,8 @@ The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm r
 
 See [AGENTS.md](./AGENTS.md) for the release flow (changesets → publish) and the rules for writing changesets.
 
+Outside contributors should follow [CONTRIBUTING.md](./CONTRIBUTING.md) (including the [CLA](./CLA.md)).
+
 ## License
 
-[AGPL-3.0-or-later](./LICENSE)
+Default public license: **[AGPL-3.0](./LICENSE)** (see `package.json` for SPDX). Commercial licenses from **Vex Heavy Industries LLC**: [**LICENSE-COMMERCIAL**](./LICENSE-COMMERCIAL), [**LICENSING.md**](./LICENSING.md).

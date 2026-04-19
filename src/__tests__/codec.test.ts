@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2020-2026 Vex Heavy Industries LLC
+ * Licensed under AGPL-3.0. See LICENSE for details.
+ * Commercial licenses available at vex.wtf
+ */
+
 import fc from "fast-check";
 /**
  * Property-based round-trip tests for msgpack codec.

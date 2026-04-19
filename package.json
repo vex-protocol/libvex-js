@@ -51,7 +51,10 @@
     "files": [
         "dist",
         "src",
-        "LICENSE"
+        "LICENSE",
+        "LICENSE-COMMERCIAL",
+        "LICENSING.md",
+        "CLA.md"
     ],
     "author": "Extra <extrahash@protonmail.com>",
     "license": "AGPL-3.0-or-later",
@@ -65,6 +68,8 @@
         "build": "rimraf dist && tsc -p tsconfig.build.json",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
+        "copyright:check": "node scripts/copyright-headers.mjs --check",
+        "copyright:apply": "node scripts/copyright-headers.mjs",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
         "lint:pkg": "publint --strict",

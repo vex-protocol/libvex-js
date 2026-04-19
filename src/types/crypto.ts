@@ -1,4 +1,10 @@
 /**
+ * Copyright (c) 2020-2026 Vex Heavy Industries LLC
+ * Licensed under AGPL-3.0. See LICENSE for details.
+ * Commercial licenses available at vex.wtf
+ */
+
+/**
  * SDK-internal crypto types. These were moved from `@vex-chat/types`
  * because they are only used by the SDK, never by the server.
  *
