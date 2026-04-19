@@ -216,8 +216,8 @@ export interface Moderation {
 
 // @public
 export const msgpack: {
-    decode: typeof decode;
-    encode: typeof encode;
+    decode: (data: Uint8Array) => unknown;
+    encode: (value: unknown) => Uint8Array;
 };
 
 export { Permission }
@@ -339,11 +339,6 @@ export interface Users {
 
 // @public
 export type VexFile = FileSQL;
-
-// Warnings were encountered during analysis:
-//
-// src/codec.ts:68:21 - (ae-forgotten-export) The symbol "decode" needs to be exported by the entry point index.d.ts
-// src/codec.ts:68:21 - (ae-forgotten-export) The symbol "encode" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 
