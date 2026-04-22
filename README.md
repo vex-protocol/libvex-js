@@ -100,7 +100,7 @@ npm run docs            # typedoc — writes ./docs
 
 The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm run test:e2e`) needs a running Spire when you point tests at it.
 
-**Docker matrix (dev):** from the `libvex-js` directory, `npm run test:spire-docker-matrix` builds a sibling [spire-js](../spire-js) Docker Compose stack in **tweetnacl** mode, runs `test:local-spire`, then repeats in **FIPS** mode, then restores or removes a generated `spire-js/.env`. Set `SPIRE_ROOT` if the Spire tree is not `../spire-js` relative to this package.
+**Docker matrix (dev):** from the `libvex-js` directory, `npm run test:spire-docker-matrix` builds a sibling `spire-js` Docker Compose stack in **tweetnacl** mode, runs `test:local-spire`, then repeats in **FIPS** mode, then restores or removes a generated `spire-js/.env`. Set `SPIRE_ROOT` if the Spire tree is not `../spire-js` relative to this package.
 
 **Applications** using `@vex-chat/libvex` configure the client with **`ClientOptions`** only (e.g. `host`, `unsafeHttp`, `devApiKey`, `cryptoProfile`)—the library does not read `.env` or any environment variables. **This repository’s e2e tests** (not the published API) can use `API_URL` / `DEV_API_KEY` in your shell or CI when you run `vitest`. When `API_URL` points at Spire, the suite **reads** `GET …/status` to pick the same `cryptoProfile` (tweetnacl vs fips) as the server, so you usually do not set `LIBVEX_E2E_CRYPTO` by hand. There is no separate `.env` contract for the npm package.
 
