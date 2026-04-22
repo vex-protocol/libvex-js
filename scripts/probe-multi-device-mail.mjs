@@ -15,7 +15,12 @@
  * Copyright (c) 2020-2026 Vex Heavy Industries LLC
  * Licensed under AGPL-3.0. See LICENSE for details.
  */
-import { setCryptoProfile, xSignKeyPairFromSecret, XKeyConvert, XUtils } from "@vex-chat/crypto";
+import {
+    setCryptoProfile,
+    xSignKeyPairFromSecret,
+    XKeyConvert,
+    XUtils,
+} from "@vex-chat/crypto";
 import { MemoryStorage } from "../dist/__tests__/harness/memory-storage.js";
 import { Client } from "../dist/index.js";
 import { msgpack } from "../dist/codec.js";
@@ -158,7 +163,12 @@ try {
     const targetUserID = d1.me.user().userID;
     const before1 = await mailInboxLen(d1);
     const before2 = await mailInboxLen(d2);
-    console.log("POST /mail inbox length: before send — d1=", before1, "d2=", before2);
+    console.log(
+        "POST /mail inbox length: before send — d1=",
+        before1,
+        "d2=",
+        before2,
+    );
 
     await sender.messages.send(targetUserID, "sync-test");
     console.log("sent sync-test to user", targetUserID);
@@ -187,7 +197,9 @@ try {
         );
         process.exit(final1 > 0 && final2 > 0 ? 0 : 1);
     }
-    console.log("[probe] no mail rows on either device after 16s of polling /mail");
+    console.log(
+        "[probe] no mail rows on either device after 16s of polling /mail",
+    );
     process.exit(2);
 } catch (e) {
     console.error(e);
