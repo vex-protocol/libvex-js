@@ -6,6 +6,10 @@
 
 import type { ClientOptions } from "../index.js";
 
+import { getCryptoProfile } from "@vex-chat/crypto";
+
+import { resolveAtRestAesKeyFromSignKeyHex } from "../utils/resolveAtRestAesKey.js";
+
 import { MemoryStorage } from "./harness/memory-storage.js";
 // Browser platform test — covers Tauri, Expo/RN, and web.
 // Runs with the poison plugin (vitest.config.browser.ts) which catches
@@ -14,7 +18,11 @@ import { MemoryStorage } from "./harness/memory-storage.js";
 import { platformSuite } from "./harness/shared-suite.js";
 
 platformSuite("browser", async (SK: string, _opts: ClientOptions) => {
-    const storage = new MemoryStorage(SK);
+    const atRest = await resolveAtRestAesKeyFromSignKeyHex(
+        SK,
+        getCryptoProfile(),
+    );
+    const storage = new MemoryStorage(atRest);
     await storage.init();
     return storage;
 });

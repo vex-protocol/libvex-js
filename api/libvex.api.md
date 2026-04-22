@@ -36,12 +36,17 @@ export class Client {
     connect(): Promise<void>;
     static create: (privateKey?: string, options?: ClientOptions, storage?: Storage_2) => Promise<Client>;
     static decryptKeyData: (keyData: Uint8Array, password: string) => string;
+    // (undocumented)
+    static decryptKeyDataAsync: (keyData: Uint8Array, password: string) => Promise<string>;
     deleteAllData(): Promise<void>;
     devices: Devices;
     emoji: Emojis;
     static encryptKeyData: (password: string, keyToSave: string, iterationOverride?: number) => Uint8Array;
+    // (undocumented)
+    static encryptKeyDataAsync: (password: string, keyToSave: string, iterationOverride?: number) => Promise<Uint8Array>;
     files: Files;
     static generateSecretKey(): string;
+    static generateSecretKeyAsync(): Promise<string>;
     getHost(): string;
     getKeys(): Keys;
     hasInit: boolean;
@@ -91,6 +96,7 @@ export interface ClientEvents {
 
 // @public
 export interface ClientOptions {
+    cryptoProfile?: "fips" | "tweetnacl";
     dbFolder?: string;
     devApiKey?: string;
     deviceName?: string;

@@ -40,11 +40,15 @@ import type { ClientMessage } from "@vex-chat/types";
 import type { AxiosInstance } from "axios";
 
 import {
-    xBoxKeyPair,
-    xBoxKeyPairFromSecret,
+    type CryptoProfile,
+    getCryptoProfile,
+    setCryptoProfile,
+    xBoxKeyPairAsync,
+    xBoxKeyPairFromSecretAsync,
     xConcat,
     xConstants,
-    xDH,
+    xDHAsync,
+    xEcdhKeyPairFromEcdsaKeyPairAsync,
     xEncode,
     xHMAC,
     xKDF,
@@ -52,11 +56,13 @@ import {
     xMakeNonce,
     xMnemonic,
     xRandomBytes,
-    xSecretbox,
-    xSecretboxOpen,
-    xSign,
+    xSecretboxAsync,
+    xSecretboxOpenAsync,
+    xSignAsync,
     xSignKeyPair,
+    xSignKeyPairAsync,
     xSignKeyPairFromSecret,
+    xSignKeyPairFromSecretAsync,
     XUtils,
 } from "@vex-chat/crypto";
 import {
@@ -72,6 +78,16 @@ import * as uuid from "uuid";
 import { z } from "zod/v4";
 
 import { WebSocketAdapter } from "./transport/websocket.js";
+import {
+    decodeFipsInitialExtraV1,
+    decodeFipsSubsequentExtraV1,
+    encodeFipsInitialExtraV1,
+    encodeFipsSubsequentExtraV1,
+    fipsP256AdFromIdentityPubs,
+    fipsP256PreKeySignPayload,
+    isFipsInitialExtraV1,
+    isFipsSubsequentExtraV1,
+} from "./utils/fipsMailExtra.js";
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -154,6 +170,12 @@ export type { Device } from "@vex-chat/types";
  * ClientOptions are the options you can pass into the client.
  */
 export interface ClientOptions {
+    /**
+     * Select crypto profile from `@vex-chat/crypto` (`setCryptoProfile`):
+     * `tweetnacl` (Ed25519 / X25519) or `fips` (P-256 + Web Crypto, separate wire
+     * layout). Deployments do not interop across profiles; pick one for all peers and server.
+     */
+    cryptoProfile?: "fips" | "tweetnacl";
     /** Folder path where the sqlite file is created. */
     dbFolder?: string;
     /** Platform label for device registration (e.g. "ios", "macos", "linux"). */
@@ -571,6 +593,7 @@ export class Client {
      * Pass-through utility from `@vex-chat/crypto`.
      */
     public static decryptKeyData = XUtils.decryptKeyData;
+    public static decryptKeyDataAsync = XUtils.decryptKeyDataAsync;
 
     /**
      * Encrypts a secret key with a password.
@@ -578,6 +601,7 @@ export class Client {
      * Pass-through utility from `@vex-chat/crypto`.
      */
     public static encryptKeyData = XUtils.encryptKeyData;
+    public static encryptKeyDataAsync = XUtils.encryptKeyDataAsync;
 
     private static readonly NOT_FOUND_TTL = 30 * 60 * 1000;
 
@@ -904,14 +928,21 @@ export class Client {
     private userRecords: Record<string, User> = {};
 
     private xKeyRing?: XKeyRing;
+    private readonly cryptoProfile: CryptoProfile;
 
     private constructor(
-        privateKey?: string,
+        material: {
+            cryptoProfile: CryptoProfile;
+            idKeys: KeyPair;
+            signKeys: KeyPair;
+        },
         options?: ClientOptions,
         storage?: Storage,
     ) {
-        // (no super — composition, not inheritance)
         this.options = options;
+        this.cryptoProfile = material.cryptoProfile;
+        this.signKeys = material.signKeys;
+        this.idKeys = material.idKeys;
 
         if (options?.unsafeHttp) {
             const env = Client.getNodeEnv();
@@ -924,15 +955,6 @@ export class Client {
             this.prefixes = { HTTP: "http://", WS: "ws://" };
         } else {
             this.prefixes = { HTTP: "https://", WS: "wss://" };
-        }
-
-        this.signKeys = privateKey
-            ? xSignKeyPairFromSecret(XUtils.decodeHex(privateKey))
-            : xSignKeyPair();
-        this.idKeys = XKeyConvert.convertKeyPair(this.signKeys);
-
-        if (!this.idKeys) {
-            throw new Error("Could not convert key to X25519!");
         }
 
         this.host = options?.host || "api.vex.wtf";
@@ -983,32 +1005,95 @@ export class Client {
         options?: ClientOptions,
         storage?: Storage,
     ): Promise<Client> => {
-        const opts = options;
-        const sk = privateKey ?? XUtils.encodeHex(xSignKeyPair().secretKey);
+        const profile = options?.cryptoProfile ?? "tweetnacl";
+        setCryptoProfile(profile);
+
+        if (
+            profile === "fips" &&
+            typeof globalThis.crypto.subtle !== "object"
+        ) {
+            throw new Error(
+                'cryptoProfile="fips" requires Web Crypto (globalThis.crypto.subtle).',
+            );
+        }
+
+        let signKeys: KeyPair;
+        if (privateKey) {
+            const d = XUtils.decodeHex(privateKey);
+            signKeys =
+                profile === "tweetnacl"
+                    ? xSignKeyPairFromSecret(d)
+                    : await xSignKeyPairFromSecretAsync(d);
+        } else {
+            signKeys =
+                profile === "tweetnacl"
+                    ? xSignKeyPair()
+                    : await xSignKeyPairAsync();
+        }
+
+        const idKeys =
+            profile === "tweetnacl"
+                ? (() => {
+                      const c = XKeyConvert.convertKeyPair(signKeys);
+                      if (!c) {
+                          throw new Error("Could not convert key to X25519!");
+                      }
+                      return c;
+                  })()
+                : await xEcdhKeyPairFromEcdsaKeyPairAsync(signKeys);
+
+        const atRestAes = XUtils.deriveLocalAtRestAesKey(
+            idKeys.secretKey,
+            profile,
+        );
+
         let resolvedStorage = storage;
         if (!resolvedStorage) {
             const { createNodeStorage } = await import("./storage/node.js");
-            const dbFileName = opts?.inMemoryDb
+            const dbFileName = options?.inMemoryDb
                 ? ":memory:"
-                : XUtils.encodeHex(
-                      xSignKeyPairFromSecret(XUtils.decodeHex(sk)).publicKey,
-                  ) + ".sqlite";
-            const dbPath = opts?.dbFolder
-                ? opts.dbFolder + "/" + dbFileName
+                : XUtils.encodeHex(signKeys.publicKey) + ".sqlite";
+            const dbPath = options?.dbFolder
+                ? options.dbFolder + "/" + dbFileName
                 : dbFileName;
-            resolvedStorage = createNodeStorage(dbPath, sk);
+            resolvedStorage = createNodeStorage(dbPath, atRestAes);
         }
-        const client = new Client(sk, opts, resolvedStorage);
+
+        await resolvedStorage.init();
+
+        const client = new Client(
+            {
+                cryptoProfile: profile,
+                idKeys,
+                signKeys,
+            },
+            options,
+            resolvedStorage,
+        );
         await client.init();
         return client;
     };
 
     /**
-     * Generates an ed25519 secret key as a hex string.
-     *
-     * @returns A secret key to use for the client. Save it permanently somewhere safe.
+     * Generates a signing secret key as a hex string (tweetnacl: Ed25519; fips: P-256 pkcs8).
+     * In `fips` mode, use `Client.generateSecretKeyAsync()` instead (Web Crypto is async).
      */
     public static generateSecretKey(): string {
+        if (getCryptoProfile() === "fips") {
+            throw new Error(
+                'Use await Client.generateSecretKeyAsync() when the active crypto profile is "fips".',
+            );
+        }
+        return XUtils.encodeHex(xSignKeyPair().secretKey);
+    }
+
+    /**
+     * Async key generation — required for `fips` profile; safe for `tweetnacl` as well.
+     */
+    public static async generateSecretKeyAsync(): Promise<string> {
+        if (getCryptoProfile() === "fips") {
+            return XUtils.encodeHex((await xSignKeyPairAsync()).secretKey);
+        }
         return XUtils.encodeHex(xSignKeyPair().secretKey);
     }
 
@@ -1032,17 +1117,23 @@ export class Client {
         extra: Uint8Array,
     ): Uint8Array[] {
         switch (type) {
-            case MailType.initial:
-                /* 32 bytes for signkey, 32 bytes for ephemeral key, 
-                 68 bytes for AD, 6 bytes for otk index (empty for no otk) */
+            case MailType.initial: {
+                if (isFipsInitialExtraV1(extra)) {
+                    const [a, b, c, d] = decodeFipsInitialExtraV1(extra);
+                    return [a, b, c, d];
+                }
+                /* 32B sign | 32B eph | 32B PK | 68B AD | 6B index (tweetnacl) */
                 const signKey = extra.slice(0, 32);
                 const ephKey = extra.slice(32, 64);
                 const ad = extra.slice(96, 164);
                 const index = extra.slice(164, 170);
                 return [signKey, ephKey, ad, index];
+            }
             case MailType.subsequent:
-                const publicKey = extra;
-                return [publicKey];
+                if (isFipsSubsequentExtraV1(extra)) {
+                    return [decodeFipsSubsequentExtraV1(extra)];
+                }
+                return [extra];
             default:
                 return [];
         }
@@ -1178,14 +1269,14 @@ export class Client {
         if (!connectToken) {
             throw new Error("Couldn't get connect token.");
         }
-        const signed = xSign(
+        const signedAsync = await xSignAsync(
             Uint8Array.from(uuid.parse(connectToken.key)),
             this.signKeys.secretKey,
         );
 
         const res = await this.http.post(
             this.getHost() + "/device/" + this.device.deviceID + "/connect",
-            msgpack.encode({ signed }),
+            msgpack.encode({ signed: signedAsync }),
             { headers: { "Content-Type": "application/msgpack" } },
         );
         const { deviceToken } = decodeAxios(ConnectResponseCodec, res.data);
@@ -1300,7 +1391,10 @@ export class Client {
             );
 
             const signed = XUtils.encodeHex(
-                xSign(XUtils.decodeHex(challenge), this.signKeys.secretKey),
+                await xSignAsync(
+                    XUtils.decodeHex(challenge),
+                    this.signKeys.secretKey,
+                ),
             );
 
             const verifyRes = await this.http.post(
@@ -1390,7 +1484,7 @@ export class Client {
         if (regKey) {
             const signKey = XUtils.encodeHex(this.signKeys.publicKey);
             const signed = XUtils.encodeHex(
-                xSign(
+                await xSignAsync(
                     Uint8Array.from(uuid.parse(regKey.key)),
                     this.signKeys.secretKey,
                 ),
@@ -1502,60 +1596,69 @@ export class Client {
 
     // returns the file details and the encryption key
     private async createFile(file: Uint8Array): Promise<[FileSQL, string]> {
-        const nonce = xMakeNonce();
-        const key = xBoxKeyPair();
-        const box = xSecretbox(Uint8Array.from(file), nonce, key.secretKey);
-
-        if (typeof FormData !== "undefined") {
-            const fpayload = new FormData();
-            fpayload.set("owner", this.getDevice().deviceID);
-            fpayload.set("nonce", XUtils.encodeHex(nonce));
-            fpayload.set("file", new Blob([new Uint8Array(box)]));
-
-            const fres = await this.http.post(
-                this.getHost() + "/file",
-                fpayload,
-                {
-                    headers: { "Content-Type": "multipart/form-data" },
-                    onUploadProgress: (progressEvent) => {
-                        const percentCompleted = Math.round(
-                            (progressEvent.loaded * 100) /
-                                (progressEvent.total ?? 1),
-                        );
-                        const { loaded, total = 0 } = progressEvent;
-                        const progress: FileProgress = {
-                            direction: "upload",
-                            loaded,
-                            progress: percentCompleted,
-                            token: XUtils.encodeHex(nonce),
-                            total,
-                        };
-                        this.emitter.emit("fileProgress", progress);
-                    },
-                },
+        return this.runWithThisCryptoProfile(async () => {
+            const nonce = xMakeNonce();
+            const fileKey: Uint8Array =
+                this.cryptoProfile === "fips"
+                    ? xRandomBytes(32)
+                    : (await xBoxKeyPairAsync()).secretKey;
+            const box = await xSecretboxAsync(
+                Uint8Array.from(file),
+                nonce,
+                fileKey,
             );
-            const fcreatedFile = decodeAxios(FileSQLCodec, fres.data);
 
-            return [fcreatedFile, XUtils.encodeHex(key.secretKey)];
-        }
+            if (typeof FormData !== "undefined") {
+                const fpayload = new FormData();
+                fpayload.set("owner", this.getDevice().deviceID);
+                fpayload.set("nonce", XUtils.encodeHex(nonce));
+                fpayload.set("file", new Blob([new Uint8Array(box)]));
 
-        const payload: {
-            file: string;
-            nonce: string;
-            owner: string;
-        } = {
-            file: XUtils.encodeBase64(box),
-            nonce: XUtils.encodeHex(nonce),
-            owner: this.getDevice().deviceID,
-        };
-        const res = await this.http.post(
-            this.getHost() + "/file/json",
-            msgpack.encode(payload),
-            { headers: { "Content-Type": "application/msgpack" } },
-        );
-        const createdFile = decodeAxios(FileSQLCodec, res.data);
+                const fres = await this.http.post(
+                    this.getHost() + "/file",
+                    fpayload,
+                    {
+                        headers: { "Content-Type": "multipart/form-data" },
+                        onUploadProgress: (progressEvent) => {
+                            const percentCompleted = Math.round(
+                                (progressEvent.loaded * 100) /
+                                    (progressEvent.total ?? 1),
+                            );
+                            const { loaded, total = 0 } = progressEvent;
+                            const progress: FileProgress = {
+                                direction: "upload",
+                                loaded,
+                                progress: percentCompleted,
+                                token: XUtils.encodeHex(nonce),
+                                total,
+                            };
+                            this.emitter.emit("fileProgress", progress);
+                        },
+                    },
+                );
+                const fcreatedFile = decodeAxios(FileSQLCodec, fres.data);
 
-        return [createdFile, XUtils.encodeHex(key.secretKey)];
+                return [fcreatedFile, XUtils.encodeHex(fileKey)];
+            }
+
+            const payload: {
+                file: string;
+                nonce: string;
+                owner: string;
+            } = {
+                file: XUtils.encodeBase64(box),
+                nonce: XUtils.encodeHex(nonce),
+                owner: this.getDevice().deviceID,
+            };
+            const res = await this.http.post(
+                this.getHost() + "/file/json",
+                msgpack.encode(payload),
+                { headers: { "Content-Type": "application/msgpack" } },
+            );
+            const createdFile = decodeAxios(FileSQLCodec, res.data);
+
+            return [createdFile, XUtils.encodeHex(fileKey)];
+        });
     }
 
     private async createInvite(serverID: string, duration: string) {
@@ -1573,14 +1676,15 @@ export class Client {
         return decodeAxios(InviteCodec, res.data);
     }
 
-    private createPreKey(): UnsavedPreKey {
-        const preKeyPair = xBoxKeyPair();
+    private async createPreKey(): Promise<UnsavedPreKey> {
+        const preKeyPair = await xBoxKeyPairAsync();
+        const toSign =
+            this.cryptoProfile === "fips"
+                ? fipsP256PreKeySignPayload(preKeyPair.publicKey)
+                : xEncode(xConstants.CURVE, preKeyPair.publicKey);
         return {
             keyPair: preKeyPair,
-            signature: xSign(
-                xEncode(xConstants.CURVE, preKeyPair.publicKey),
-                this.signKeys.secretKey,
-            ),
+            signature: await xSignAsync(toSign, this.signKeys.secretKey),
         };
     }
 
@@ -1589,6 +1693,27 @@ export class Client {
             this.getHost() + "/server/" + globalThis.btoa(name),
         );
         return decodeAxios(ServerCodec, res.data);
+    }
+
+    /**
+     * `xDHAsync` and other helpers in `@vex-chat/crypto` use the process-wide
+     * active profile. When several {@link Client} instances use different
+     * `cryptoProfile` values, scope the global to this instance for the duration
+     * of that crypto work.
+     */
+    private async runWithThisCryptoProfile<T>(
+        fn: () => Promise<T>,
+    ): Promise<T> {
+        const prev = getCryptoProfile();
+        if (prev === this.cryptoProfile) {
+            return await fn();
+        }
+        setCryptoProfile(this.cryptoProfile);
+        try {
+            return await fn();
+        } finally {
+            setCryptoProfile(prev);
+        }
     }
 
     private async createSession(
@@ -1600,164 +1725,198 @@ export class Client {
         part of a group message */
         mailID: null | string,
         forward: boolean,
+        /**
+         * When `readMail` triggers a best-effort session re-establish, key-bundle
+         * errors should not reject the full read pipeline.
+         */
+        allowKeyBundleFailure = false,
     ): Promise<void> {
-        let keyBundle: KeyBundle;
+        return this.runWithThisCryptoProfile(async () => {
+            let keyBundle: KeyBundle;
 
-        try {
-            keyBundle = await this.retrieveKeyBundle(device.deviceID);
-        } catch {
-            return;
-        }
-
-        if (!this.xKeyRing) {
-            if (this.manuallyClosing) {
-                return;
-            }
-            throw new Error("Key ring not initialized.");
-        }
-
-        // my keys
-        const IK_A = this.xKeyRing.identityKeys.secretKey;
-        const IK_AP = this.xKeyRing.identityKeys.publicKey;
-        const EK_A = this.xKeyRing.ephemeralKeys.secretKey;
-
-        // their keys
-        const IK_B_raw = XKeyConvert.convertPublicKey(
-            new Uint8Array(keyBundle.signKey),
-        );
-        if (!IK_B_raw) {
-            throw new Error("Could not convert sign key to X25519.");
-        }
-        const IK_B = IK_B_raw;
-        const SPK_B = new Uint8Array(keyBundle.preKey.publicKey);
-        const OPK_B = keyBundle.otk
-            ? new Uint8Array(keyBundle.otk.publicKey)
-            : null;
-
-        // diffie hellman functions
-        const DH1 = xDH(new Uint8Array(IK_A), SPK_B);
-        const DH2 = xDH(new Uint8Array(EK_A), IK_B);
-        const DH3 = xDH(new Uint8Array(EK_A), SPK_B);
-        const DH4 = OPK_B ? xDH(new Uint8Array(EK_A), OPK_B) : null;
-
-        // initial key material
-        const IKM = DH4 ? xConcat(DH1, DH2, DH3, DH4) : xConcat(DH1, DH2, DH3);
-
-        // one time key index
-        const IDX = keyBundle.otk
-            ? XUtils.numberToUint8Arr(keyBundle.otk.index ?? 0)
-            : XUtils.numberToUint8Arr(0);
-
-        // shared secret key
-        const SK = xKDF(IKM);
-        const PK = xBoxKeyPairFromSecret(SK).publicKey;
-
-        const AD = xConcat(
-            xEncode(xConstants.CURVE, IK_AP),
-            xEncode(xConstants.CURVE, IK_B),
-        );
-
-        const nonce = xMakeNonce();
-        const cipher = xSecretbox(message, nonce, SK);
-
-        /* 32 bytes for signkey, 32 bytes for ephemeral key, 
-        68 bytes for AD, 6 bytes for otk index (empty for no otk) */
-        const extra = xConcat(
-            this.signKeys.publicKey,
-            this.xKeyRing.ephemeralKeys.publicKey,
-            PK,
-            AD,
-            IDX,
-        );
-
-        const mail: MailWS = {
-            authorID: this.getUser().userID,
-            cipher,
-            extra,
-            forward,
-            group,
-            mailID: mailID || uuid.v4(),
-            mailType: MailType.initial,
-            nonce,
-            readerID: user.userID,
-            recipient: device.deviceID,
-            sender: this.getDevice().deviceID,
-        };
-
-        const hmac = xHMAC(mail, SK);
-
-        const msg: ResourceMsg = {
-            action: "CREATE",
-            data: mail,
-            resourceType: "mail",
-            transmissionID: uuid.v4(),
-            type: "resource",
-        };
-
-        // discard the ephemeral keys
-        this.newEphemeralKeys();
-
-        const sessionEntry: SessionSQL = {
-            deviceID: device.deviceID,
-            fingerprint: XUtils.encodeHex(AD),
-            lastUsed: new Date().toISOString(),
-            mode: "initiator",
-            publicKey: XUtils.encodeHex(PK),
-            sessionID: uuid.v4(),
-            SK: XUtils.encodeHex(SK),
-            userID: user.userID,
-            verified: false,
-        };
-
-        await this.database.saveSession(sessionEntry);
-
-        this.emitter.emit("session", sessionEntry, user);
-
-        // emit the message
-        const forwardedMsg = forward
-            ? messageSchema.parse(msgpack.decode(message))
-            : null;
-        const emitMsg: Message = forwardedMsg
-            ? { ...forwardedMsg, forward: true }
-            : {
-                  authorID: mail.authorID,
-                  decrypted: true,
-                  direction: "outgoing",
-                  forward: mail.forward,
-                  group: mail.group ? uuid.stringify(mail.group) : null,
-                  mailID: mail.mailID,
-                  message: XUtils.encodeUTF8(message),
-                  nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
-                  readerID: mail.readerID,
-                  recipient: mail.recipient,
-                  sender: mail.sender,
-                  timestamp: new Date().toISOString(),
-              };
-        this.emitter.emit("message", emitMsg);
-
-        // send mail and wait for response
-        await new Promise((res, rej) => {
-            const callback = (packedMsg: Uint8Array) => {
-                const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
-                if (receivedMsg.transmissionID === msg.transmissionID) {
-                    this.socket.off("message", callback);
-                    const parsed = WSMessageSchema.safeParse(receivedMsg);
-                    if (parsed.success && parsed.data.type === "success") {
-                        res(parsed.data.data);
-                    } else {
-                        rej(
-                            new Error(
-                                "Mail delivery failed: " +
-                                    JSON.stringify(receivedMsg),
-                            ),
-                        );
-                    }
+            try {
+                keyBundle = await this.retrieveKeyBundle(device.deviceID);
+            } catch (e) {
+                if (allowKeyBundleFailure) {
+                    return;
                 }
+                const wrap =
+                    e instanceof Error ? e : new Error(String(e), { cause: e });
+                throw new Error(
+                    `Failed to load keyBundle for device ${device.deviceID}: ${wrap.message}`,
+                    { cause: e },
+                );
+            }
+
+            if (!this.xKeyRing) {
+                if (this.manuallyClosing) {
+                    return;
+                }
+                throw new Error("Key ring not initialized.");
+            }
+
+            // my keys
+            const IK_A = this.xKeyRing.identityKeys.secretKey;
+            const IK_AP = this.xKeyRing.identityKeys.publicKey;
+            const EK_A = this.xKeyRing.ephemeralKeys.secretKey;
+
+            const fips = this.cryptoProfile === "fips";
+            // their keys — FIPS: `signKey` in bundle is the peer P-256 ECDH identity (raw, typically 65B).
+            const SPK_B = new Uint8Array(keyBundle.preKey.publicKey);
+            const OPK_B = keyBundle.otk
+                ? new Uint8Array(keyBundle.otk.publicKey)
+                : null;
+            const IK_B = fips
+                ? new Uint8Array(keyBundle.signKey)
+                : (() => {
+                      const c = XKeyConvert.convertPublicKey(
+                          new Uint8Array(keyBundle.signKey),
+                      );
+                      if (!c) {
+                          throw new Error(
+                              "Could not convert sign key to X25519.",
+                          );
+                      }
+                      return c;
+                  })();
+
+            // diffie hellman functions
+            const DH1 = await xDHAsync(new Uint8Array(IK_A), SPK_B);
+            const DH2 = await xDHAsync(new Uint8Array(EK_A), IK_B);
+            const DH3 = await xDHAsync(new Uint8Array(EK_A), SPK_B);
+            const DH4 = OPK_B
+                ? await xDHAsync(new Uint8Array(EK_A), OPK_B)
+                : null;
+
+            // initial key material
+            const IKM = DH4
+                ? xConcat(DH1, DH2, DH3, DH4)
+                : xConcat(DH1, DH2, DH3);
+
+            // one time key index
+            const IDX = keyBundle.otk
+                ? XUtils.numberToUint8Arr(keyBundle.otk.index ?? 0)
+                : XUtils.numberToUint8Arr(0);
+
+            // shared secret key
+            const SK = xKDF(IKM);
+            const PK = (await xBoxKeyPairFromSecretAsync(SK)).publicKey;
+
+            const AD = fips
+                ? fipsP256AdFromIdentityPubs(
+                      IK_AP,
+                      new Uint8Array(keyBundle.signKey),
+                  )
+                : xConcat(
+                      xEncode(xConstants.CURVE, IK_AP),
+                      xEncode(xConstants.CURVE, IK_B),
+                  );
+
+            const nonce = xMakeNonce();
+            const cipher = await xSecretboxAsync(message, nonce, SK);
+
+            const signKeyWire = fips ? IK_AP : this.signKeys.publicKey;
+            const ephKeyWire = this.xKeyRing.ephemeralKeys.publicKey;
+
+            const extra = fips
+                ? encodeFipsInitialExtraV1(signKeyWire, ephKeyWire, PK, AD, IDX)
+                : xConcat(
+                      this.signKeys.publicKey,
+                      this.xKeyRing.ephemeralKeys.publicKey,
+                      PK,
+                      AD,
+                      IDX,
+                  );
+
+            const mail: MailWS = {
+                authorID: this.getUser().userID,
+                cipher,
+                extra,
+                forward,
+                group,
+                mailID: mailID || uuid.v4(),
+                mailType: MailType.initial,
+                nonce,
+                readerID: user.userID,
+                recipient: device.deviceID,
+                sender: this.getDevice().deviceID,
             };
-            this.socket.on("message", callback);
-            void this.send(msg, hmac);
+
+            const hmac = xHMAC(mail, SK);
+
+            const msg: ResourceMsg = {
+                action: "CREATE",
+                data: mail,
+                resourceType: "mail",
+                transmissionID: uuid.v4(),
+                type: "resource",
+            };
+
+            // discard the ephemeral keys
+            await this.newEphemeralKeys();
+
+            const sessionEntry: SessionSQL = {
+                deviceID: device.deviceID,
+                fingerprint: XUtils.encodeHex(AD),
+                lastUsed: new Date().toISOString(),
+                mode: "initiator",
+                publicKey: XUtils.encodeHex(PK),
+                sessionID: uuid.v4(),
+                SK: XUtils.encodeHex(SK),
+                userID: user.userID,
+                verified: false,
+            };
+
+            await this.database.saveSession(sessionEntry);
+
+            this.emitter.emit("session", sessionEntry, user);
+
+            // emit the message
+            const forwardedMsg = forward
+                ? messageSchema.parse(msgpack.decode(message))
+                : null;
+            const emitMsg: Message = forwardedMsg
+                ? { ...forwardedMsg, forward: true }
+                : {
+                      authorID: mail.authorID,
+                      decrypted: true,
+                      direction: "outgoing",
+                      forward: mail.forward,
+                      group: mail.group ? uuid.stringify(mail.group) : null,
+                      mailID: mail.mailID,
+                      message: XUtils.encodeUTF8(message),
+                      nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
+                      readerID: mail.readerID,
+                      recipient: mail.recipient,
+                      sender: mail.sender,
+                      timestamp: new Date().toISOString(),
+                  };
+            this.emitter.emit("message", emitMsg);
+
+            // send mail and wait for response
+            await new Promise((res, rej) => {
+                const callback = (packedMsg: Uint8Array) => {
+                    const [_header, receivedMsg] =
+                        XUtils.unpackMessage(packedMsg);
+                    if (receivedMsg.transmissionID === msg.transmissionID) {
+                        this.socket.off("message", callback);
+                        const parsed = WSMessageSchema.safeParse(receivedMsg);
+                        if (parsed.success && parsed.data.type === "success") {
+                            res(parsed.data.data);
+                        } else {
+                            rej(
+                                new Error(
+                                    "Mail delivery failed: " +
+                                        JSON.stringify(receivedMsg),
+                                ),
+                            );
+                        }
+                    }
+                };
+                this.socket.on("message", callback);
+                void this.send(msg, hmac);
+            });
         });
-        this.sending.delete(device.deviceID);
     }
 
     private async deleteChannel(channelID: string): Promise<void> {
@@ -1861,28 +2020,23 @@ export class Client {
             this.getUser().userID,
             "own",
         );
-        const promises = [];
         for (const device of devices) {
-            if (device.deviceID !== this.getDevice().deviceID) {
-                promises.push(
-                    this.sendMail(
-                        device,
-                        this.getUser(),
-                        msgBytes,
-                        null,
-                        copy.mailID,
-                        true,
-                    ),
+            if (device.deviceID === this.getDevice().deviceID) {
+                continue;
+            }
+            try {
+                await this.sendMail(
+                    device,
+                    this.getUser(),
+                    msgBytes,
+                    null,
+                    copy.mailID,
+                    true,
                 );
+            } catch {
+                /* best-effort per device; parallel handshakes share ephemeral state */
             }
         }
-        void Promise.allSettled(promises).then((results) => {
-            for (const result of results) {
-                const { status } = result;
-                if (status === "rejected") {
-                }
-            }
-        });
     }
 
     private async getChannelByID(channelID: string): Promise<Channel | null> {
@@ -2309,7 +2463,7 @@ export class Client {
 
                 switch (msg.type) {
                     case "challenge":
-                        this.respond(msg);
+                        void this.respond(msg);
                         break;
                     case "error":
                         break;
@@ -2377,14 +2531,14 @@ export class Client {
         await this.submitOTK(needs);
     }
 
-    private newEphemeralKeys() {
+    private async newEphemeralKeys() {
         if (!this.xKeyRing) {
             if (this.manuallyClosing) {
                 return;
             }
             throw new Error("Key ring not initialized.");
         }
-        this.xKeyRing.ephemeralKeys = xBoxKeyPair();
+        this.xKeyRing.ephemeralKeys = await xBoxKeyPairAsync();
     }
 
     private ping() {
@@ -2409,7 +2563,7 @@ export class Client {
         const preKeys: PreKeysCrypto =
             existingPreKeys ??
             (await (async () => {
-                const unsaved = this.createPreKey();
+                const unsaved = await this.createPreKey();
                 const [saved] = await this.database.savePreKeys(
                     [unsaved],
                     false,
@@ -2427,7 +2581,7 @@ export class Client {
                 sqlSessionToCrypto(session);
         }
 
-        const ephemeralKeys = xBoxKeyPair();
+        const ephemeralKeys = await xBoxKeyPairAsync();
 
         this.xKeyRing = {
             ephemeralKeys,
@@ -2493,267 +2647,299 @@ export class Client {
         this.reading = true;
 
         try {
-            const healSession = async () => {
-                if (this.manuallyClosing || !this.xKeyRing) {
-                    return;
-                }
-                const deviceEntry = await this.getDeviceByID(mail.sender);
-                const [user, _err] = await this.fetchUser(mail.authorID);
-                if (deviceEntry && user) {
-                    void this.createSession(
-                        deviceEntry,
-                        user,
-                        XUtils.decodeUTF8(`��RETRY_REQUEST:${mail.mailID}��`),
-                        mail.group,
-                        uuid.v4(),
-                        false,
-                    );
-                }
-            };
-
-            switch (mail.mailType) {
-                case MailType.initial:
-                    const extraParts = Client.deserializeExtra(
-                        MailType.initial,
-                        new Uint8Array(mail.extra),
-                    );
-                    const signKey = extraParts[0];
-                    const ephKey = extraParts[1];
-                    const indexBytes = extraParts[3];
-                    if (!signKey || !ephKey || !indexBytes) {
-                        throw new Error(
-                            "Malformed initial mail extra: missing signKey, ephKey, or indexBytes",
+            await this.runWithThisCryptoProfile(async () => {
+                const healSession = async () => {
+                    if (this.manuallyClosing || !this.xKeyRing) {
+                        return;
+                    }
+                    const deviceEntry = await this.getDeviceByID(mail.sender);
+                    const [user, _err] = await this.fetchUser(mail.authorID);
+                    if (deviceEntry && user) {
+                        void this.createSession(
+                            deviceEntry,
+                            user,
+                            XUtils.decodeUTF8(
+                                `��RETRY_REQUEST:${mail.mailID}��`,
+                            ),
+                            mail.group,
+                            uuid.v4(),
+                            false,
+                            true,
                         );
                     }
+                };
 
-                    const preKeyIndex = XUtils.uint8ArrToNumber(indexBytes);
-
-                    const otk =
-                        preKeyIndex === 0
-                            ? null
-                            : await this.database.getOneTimeKey(preKeyIndex);
-
-                    if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
-                        return;
-                    }
-
-                    // their public keys
-                    const IK_A_raw = XKeyConvert.convertPublicKey(signKey);
-                    if (!IK_A_raw) {
-                        return;
-                    }
-                    const IK_A = IK_A_raw;
-                    const EK_A = ephKey;
-
-                    if (!this.xKeyRing) {
-                        return;
-                    }
-                    // my private keys
-                    const IK_B = this.xKeyRing.identityKeys.secretKey;
-                    const IK_BP = this.xKeyRing.identityKeys.publicKey;
-                    const SPK_B = this.xKeyRing.preKeys.keyPair.secretKey;
-                    const OPK_B = otk ? otk.keyPair.secretKey : null;
-
-                    // diffie hellman functions
-                    const DH1 = xDH(SPK_B, IK_A);
-                    const DH2 = xDH(IK_B, EK_A);
-                    const DH3 = xDH(SPK_B, EK_A);
-                    const DH4 = OPK_B ? xDH(OPK_B, EK_A) : null;
-
-                    // initial key material
-                    const IKM = DH4
-                        ? xConcat(DH1, DH2, DH3, DH4)
-                        : xConcat(DH1, DH2, DH3);
-
-                    // shared secret key
-                    const SK = xKDF(IKM);
-                    const PK = xBoxKeyPairFromSecret(SK).publicKey;
-
-                    const hmac = xHMAC(mail, SK);
-
-                    // associated data
-                    const AD = xConcat(
-                        xEncode(xConstants.CURVE, IK_A),
-                        xEncode(xConstants.CURVE, IK_BP),
-                    );
-
-                    if (!XUtils.bytesEqual(hmac, header)) {
-                        return;
-                    }
-                    const unsealed = xSecretboxOpen(
-                        new Uint8Array(mail.cipher),
-                        new Uint8Array(mail.nonce),
-                        SK,
-                    );
-                    if (unsealed) {
-                        let plaintext = "";
-                        if (!mail.forward) {
-                            plaintext = XUtils.encodeUTF8(unsealed);
-                        }
-
-                        // emit the message
-                        const fwdMsg1 = mail.forward
-                            ? messageSchema.parse(msgpack.decode(unsealed))
-                            : null;
-                        const message: Message = fwdMsg1
-                            ? { ...fwdMsg1, forward: true }
-                            : {
-                                  authorID: mail.authorID,
-                                  decrypted: true,
-                                  direction: "incoming",
-                                  forward: mail.forward,
-                                  group: mail.group
-                                      ? uuid.stringify(mail.group)
-                                      : null,
-                                  mailID: mail.mailID,
-                                  message: plaintext,
-                                  nonce: XUtils.encodeHex(
-                                      new Uint8Array(mail.nonce),
-                                  ),
-                                  readerID: mail.readerID,
-                                  recipient: mail.recipient,
-                                  sender: mail.sender,
-                                  timestamp: timestamp,
-                              };
-
-                        this.emitter.emit("message", message);
-
-                        // discard onetimekey
-                        await this.database.deleteOneTimeKey(preKeyIndex);
-
-                        const deviceEntry = await this.getDeviceByID(
-                            mail.sender,
+                switch (mail.mailType) {
+                    case MailType.initial:
+                        const extraParts = Client.deserializeExtra(
+                            MailType.initial,
+                            new Uint8Array(mail.extra),
                         );
-                        if (!deviceEntry) {
-                            throw new Error("Couldn't get device entry.");
+                        const signKey = extraParts[0];
+                        const ephKey = extraParts[1];
+                        const indexBytes = extraParts[3];
+                        if (!signKey || !ephKey || !indexBytes) {
+                            throw new Error(
+                                "Malformed initial mail extra: missing signKey, ephKey, or indexBytes",
+                            );
                         }
-                        const [userEntry, _userErr] = await this.fetchUser(
-                            deviceEntry.owner,
+
+                        const preKeyIndex = XUtils.uint8ArrToNumber(indexBytes);
+
+                        const otk =
+                            preKeyIndex === 0
+                                ? null
+                                : await this.database.getOneTimeKey(
+                                      preKeyIndex,
+                                  );
+
+                        if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
+                            return;
+                        }
+
+                        // their public keys
+                        const fipsRead = isFipsInitialExtraV1(
+                            new Uint8Array(mail.extra),
                         );
-                        if (!userEntry) {
-                            throw new Error("Couldn't get user entry.");
+                        const IK_A = fipsRead
+                            ? signKey
+                            : (() => {
+                                  const c =
+                                      XKeyConvert.convertPublicKey(signKey);
+                                  if (!c) {
+                                      return null;
+                                  }
+                                  return c;
+                              })();
+                        if (!IK_A) {
+                            return;
                         }
+                        const EK_A = ephKey;
 
-                        this.userRecords[userEntry.userID] = userEntry;
-                        this.deviceRecords[deviceEntry.deviceID] = deviceEntry;
+                        if (!this.xKeyRing) {
+                            return;
+                        }
+                        // my private keys
+                        const IK_B = this.xKeyRing.identityKeys.secretKey;
+                        const IK_BP = this.xKeyRing.identityKeys.publicKey;
+                        const SPK_B = this.xKeyRing.preKeys.keyPair.secretKey;
+                        const OPK_B = otk ? otk.keyPair.secretKey : null;
 
-                        // save session
-                        const newSession: SessionSQL = {
-                            deviceID: mail.sender,
-                            fingerprint: XUtils.encodeHex(AD),
-                            lastUsed: new Date().toISOString(),
-                            mode: "receiver",
-                            publicKey: XUtils.encodeHex(PK),
-                            sessionID: uuid.v4(),
-                            SK: XUtils.encodeHex(SK),
-                            userID: userEntry.userID,
-                            verified: false,
-                        };
-                        await this.database.saveSession(newSession);
+                        // diffie hellman functions
+                        const DH1 = await xDHAsync(SPK_B, IK_A);
+                        const DH2 = await xDHAsync(IK_B, EK_A);
+                        const DH3 = await xDHAsync(SPK_B, EK_A);
+                        const DH4 = OPK_B ? await xDHAsync(OPK_B, EK_A) : null;
 
-                        const [user] = await this.fetchUser(newSession.userID);
+                        // initial key material
+                        const IKM = DH4
+                            ? xConcat(DH1, DH2, DH3, DH4)
+                            : xConcat(DH1, DH2, DH3);
 
-                        if (user) {
-                            this.emitter.emit("session", newSession, user);
+                        // shared secret key
+                        const SK = xKDF(IKM);
+                        const PK = (await xBoxKeyPairFromSecretAsync(SK))
+                            .publicKey;
+
+                        const hmac = xHMAC(mail, SK);
+
+                        // associated data
+                        const AD = fipsRead
+                            ? fipsP256AdFromIdentityPubs(IK_A, IK_BP)
+                            : xConcat(
+                                  xEncode(xConstants.CURVE, IK_A),
+                                  xEncode(xConstants.CURVE, IK_BP),
+                              );
+
+                        if (!XUtils.bytesEqual(hmac, header)) {
+                            return;
+                        }
+                        const unsealed = await xSecretboxOpenAsync(
+                            new Uint8Array(mail.cipher),
+                            new Uint8Array(mail.nonce),
+                            SK,
+                        );
+                        if (unsealed) {
+                            let plaintext = "";
+                            if (!mail.forward) {
+                                plaintext = XUtils.encodeUTF8(unsealed);
+                            }
+
+                            // emit the message
+                            const fwdMsg1 = mail.forward
+                                ? messageSchema.parse(msgpack.decode(unsealed))
+                                : null;
+                            const message: Message = fwdMsg1
+                                ? { ...fwdMsg1, forward: true }
+                                : {
+                                      authorID: mail.authorID,
+                                      decrypted: true,
+                                      direction: "incoming",
+                                      forward: mail.forward,
+                                      group: mail.group
+                                          ? uuid.stringify(mail.group)
+                                          : null,
+                                      mailID: mail.mailID,
+                                      message: plaintext,
+                                      nonce: XUtils.encodeHex(
+                                          new Uint8Array(mail.nonce),
+                                      ),
+                                      readerID: mail.readerID,
+                                      recipient: mail.recipient,
+                                      sender: mail.sender,
+                                      timestamp: timestamp,
+                                  };
+
+                            this.emitter.emit("message", message);
+
+                            // discard onetimekey
+                            await this.database.deleteOneTimeKey(preKeyIndex);
+
+                            const deviceEntry = await this.getDeviceByID(
+                                mail.sender,
+                            );
+                            if (!deviceEntry) {
+                                throw new Error("Couldn't get device entry.");
+                            }
+                            const [userEntry, _userErr] = await this.fetchUser(
+                                deviceEntry.owner,
+                            );
+                            if (!userEntry) {
+                                throw new Error("Couldn't get user entry.");
+                            }
+
+                            this.userRecords[userEntry.userID] = userEntry;
+                            this.deviceRecords[deviceEntry.deviceID] =
+                                deviceEntry;
+
+                            // save session
+                            const newSession: SessionSQL = {
+                                deviceID: mail.sender,
+                                fingerprint: XUtils.encodeHex(AD),
+                                lastUsed: new Date().toISOString(),
+                                mode: "receiver",
+                                publicKey: XUtils.encodeHex(PK),
+                                sessionID: uuid.v4(),
+                                SK: XUtils.encodeHex(SK),
+                                userID: userEntry.userID,
+                                verified: false,
+                            };
+                            await this.database.saveSession(newSession);
+
+                            const [user] = await this.fetchUser(
+                                newSession.userID,
+                            );
+
+                            if (user) {
+                                this.emitter.emit("session", newSession, user);
+                            } else {
+                            }
                         } else {
                         }
-                    } else {
-                    }
-                    break;
-                case MailType.subsequent:
-                    const publicKey = Client.deserializeExtra(
-                        mail.mailType,
-                        new Uint8Array(mail.extra),
-                    )[0];
-                    if (!publicKey) {
-                        throw new Error(
-                            "Malformed subsequent mail extra: missing publicKey",
-                        );
-                    }
-                    let session = await this.getSessionByPubkey(publicKey);
-                    let retries = 0;
-                    while (!session) {
-                        if (retries >= 3) {
-                            break;
+                        break;
+                    case MailType.subsequent: {
+                        const extraBuf = new Uint8Array(mail.extra);
+                        const publicKey = isFipsSubsequentExtraV1(extraBuf)
+                            ? decodeFipsSubsequentExtraV1(extraBuf)
+                            : Client.deserializeExtra(
+                                  mail.mailType,
+                                  extraBuf,
+                              )[0];
+                        if (!publicKey) {
+                            throw new Error(
+                                "Malformed subsequent mail extra: missing publicKey",
+                            );
                         }
-                        await sleep(100 * 2 ** retries);
-                        retries++;
-                        session = await this.getSessionByPubkey(publicKey);
+                        let session = await this.getSessionByPubkey(publicKey);
+                        let retries = 0;
+                        while (!session) {
+                            if (retries >= 3) {
+                                break;
+                            }
+                            await sleep(100 * 2 ** retries);
+                            retries++;
+                            session = await this.getSessionByPubkey(publicKey);
+                        }
+
+                        if (!session) {
+                            void healSession();
+                            return;
+                        }
+                        const HMAC = xHMAC(mail, session.SK);
+
+                        if (!XUtils.bytesEqual(HMAC, header)) {
+                            void healSession();
+                            return;
+                        }
+
+                        const decrypted = await xSecretboxOpenAsync(
+                            new Uint8Array(mail.cipher),
+                            new Uint8Array(mail.nonce),
+                            session.SK,
+                        );
+
+                        if (decrypted) {
+                            const fwdMsg2 = mail.forward
+                                ? messageSchema.parse(msgpack.decode(decrypted))
+                                : null;
+                            const message: Message = fwdMsg2
+                                ? {
+                                      ...fwdMsg2,
+                                      forward: true,
+                                  }
+                                : {
+                                      authorID: mail.authorID,
+                                      decrypted: true,
+                                      direction: "incoming",
+                                      forward: mail.forward,
+                                      group: mail.group
+                                          ? uuid.stringify(mail.group)
+                                          : null,
+                                      mailID: mail.mailID,
+                                      message: XUtils.encodeUTF8(decrypted),
+                                      nonce: XUtils.encodeHex(
+                                          new Uint8Array(mail.nonce),
+                                      ),
+                                      readerID: mail.readerID,
+                                      recipient: mail.recipient,
+                                      sender: mail.sender,
+                                      timestamp: timestamp,
+                                  };
+                            this.emitter.emit("message", message);
+
+                            void this.database.markSessionUsed(
+                                session.sessionID,
+                            );
+                        } else {
+                            void healSession();
+
+                            // emit the message
+                            const message: Message = {
+                                authorID: mail.authorID,
+                                decrypted: false,
+                                direction: "incoming",
+                                forward: mail.forward,
+                                group: mail.group
+                                    ? uuid.stringify(mail.group)
+                                    : null,
+                                mailID: mail.mailID,
+                                message: "",
+                                nonce: XUtils.encodeHex(
+                                    new Uint8Array(mail.nonce),
+                                ),
+                                readerID: mail.readerID,
+                                recipient: mail.recipient,
+                                sender: mail.sender,
+                                timestamp: timestamp,
+                            };
+                            this.emitter.emit("message", message);
+                        }
+                        break;
                     }
-
-                    if (!session) {
-                        void healSession();
-                        return;
-                    }
-                    const HMAC = xHMAC(mail, session.SK);
-
-                    if (!XUtils.bytesEqual(HMAC, header)) {
-                        void healSession();
-                        return;
-                    }
-
-                    const decrypted = xSecretboxOpen(
-                        new Uint8Array(mail.cipher),
-                        new Uint8Array(mail.nonce),
-                        session.SK,
-                    );
-
-                    if (decrypted) {
-                        const fwdMsg2 = mail.forward
-                            ? messageSchema.parse(msgpack.decode(decrypted))
-                            : null;
-                        const message: Message = fwdMsg2
-                            ? {
-                                  ...fwdMsg2,
-                                  forward: true,
-                              }
-                            : {
-                                  authorID: mail.authorID,
-                                  decrypted: true,
-                                  direction: "incoming",
-                                  forward: mail.forward,
-                                  group: mail.group
-                                      ? uuid.stringify(mail.group)
-                                      : null,
-                                  mailID: mail.mailID,
-                                  message: XUtils.encodeUTF8(decrypted),
-                                  nonce: XUtils.encodeHex(
-                                      new Uint8Array(mail.nonce),
-                                  ),
-                                  readerID: mail.readerID,
-                                  recipient: mail.recipient,
-                                  sender: mail.sender,
-                                  timestamp: timestamp,
-                              };
-                        this.emitter.emit("message", message);
-
-                        void this.database.markSessionUsed(session.sessionID);
-                    } else {
-                        void healSession();
-
-                        // emit the message
-                        const message: Message = {
-                            authorID: mail.authorID,
-                            decrypted: false,
-                            direction: "incoming",
-                            forward: mail.forward,
-                            group: mail.group
-                                ? uuid.stringify(mail.group)
-                                : null,
-                            mailID: mail.mailID,
-                            message: "",
-                            nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
-                            readerID: mail.readerID,
-                            recipient: mail.recipient,
-                            sender: mail.sender,
-                            timestamp: timestamp,
-                        };
-                        this.emitter.emit("message", message);
-                    }
-                    break;
-                default:
-                    break;
-            }
+                    default:
+                        break;
+                }
+            });
         } finally {
             this.reading = false;
         }
@@ -2788,9 +2974,12 @@ export class Client {
             throw new Error("Couldn't fetch token.");
         }
 
+        // Stored on Spire for signature verification: Ed25519 (hex) in tweetnacl;
+        // P-256 ECDSA SPKI (hex) in FIPS. The server maps this to a raw ECDH
+        // identity in `getKeyBundle` for X3DH; see spire `Database.getKeyBundle`.
         const signKey = this.getKeys().public;
         const signed = XUtils.encodeHex(
-            xSign(
+            await xSignAsync(
                 Uint8Array.from(uuid.parse(token.key)),
                 this.signKeys.secretKey,
             ),
@@ -2819,9 +3008,9 @@ export class Client {
         return decodeAxios(DeviceCodec, res.data);
     }
 
-    private respond(msg: ChallMsg) {
+    private async respond(msg: ChallMsg) {
         const response: RespMsg = {
-            signed: xSign(
+            signed: await xSignAsync(
                 new Uint8Array(msg.challenge),
                 this.signKeys.secretKey,
             ),
@@ -2879,7 +3068,7 @@ export class Client {
         );
         const fileData = res.data;
 
-        const decrypted = xSecretboxOpen(
+        const decrypted = await xSecretboxOpenAsync(
             new Uint8Array(fileData),
             XUtils.decodeHex(details.nonce),
             XUtils.decodeHex(key),
@@ -2967,7 +3156,6 @@ export class Client {
         }
 
         const mailID = uuid.v4();
-        const promises: Array<Promise<void>> = [];
 
         const userIDs = [...new Set(userList.map((user) => user.userID))];
         const devices = await this.getMultiUserDeviceList(userIDs);
@@ -2977,24 +3165,19 @@ export class Client {
             if (!ownerRecord) {
                 continue;
             }
-            promises.push(
-                this.sendMail(
+            try {
+                await this.sendMail(
                     device,
                     ownerRecord,
                     XUtils.decodeUTF8(message),
                     uuidToUint8(channelID),
                     mailID,
                     false,
-                ),
-            );
-        }
-        void Promise.allSettled(promises).then((results) => {
-            for (const result of results) {
-                const { status } = result;
-                if (status === "rejected") {
-                }
+                );
+            } catch {
+                /* best-effort; each device needs its own X3DH handshake (sequential) */
             }
-        });
+        }
     }
 
     /* Sends encrypted mail to a user. */
@@ -3011,87 +3194,101 @@ export class Client {
             await sleep(100);
         }
         this.sending.set(device.deviceID, device);
+        try {
+            const session = await this.database.getSessionByDeviceID(
+                device.deviceID,
+            );
 
-        const session = await this.database.getSessionByDeviceID(
-            device.deviceID,
-        );
+            if (!session || retry) {
+                await this.createSession(
+                    device,
+                    user,
+                    msg,
+                    group,
+                    mailID,
+                    forward,
+                    false,
+                );
+                return;
+            }
 
-        if (!session || retry) {
-            await this.createSession(device, user, msg, group, mailID, forward);
-            return;
-        }
+            const nonce = xMakeNonce();
+            const cipher = await xSecretboxAsync(msg, nonce, session.SK);
+            const extra =
+                this.cryptoProfile === "fips"
+                    ? encodeFipsSubsequentExtraV1(session.publicKey)
+                    : session.publicKey;
 
-        const nonce = xMakeNonce();
-        const cipher = xSecretbox(msg, nonce, session.SK);
-        const extra = session.publicKey;
-
-        const mail: MailWS = {
-            authorID: this.getUser().userID,
-            cipher,
-            extra,
-            forward,
-            group,
-            mailID: mailID || uuid.v4(),
-            mailType: MailType.subsequent,
-            nonce,
-            readerID: session.userID,
-            recipient: device.deviceID,
-            sender: this.getDevice().deviceID,
-        };
-
-        const msgb: ResourceMsg = {
-            action: "CREATE",
-            data: mail,
-            resourceType: "mail",
-            transmissionID: uuid.v4(),
-            type: "resource",
-        };
-
-        const hmac = xHMAC(mail, session.SK);
-
-        const fwdOut = forward
-            ? messageSchema.parse(msgpack.decode(msg))
-            : null;
-        const outMsg: Message = fwdOut
-            ? { ...fwdOut, forward: true }
-            : {
-                  authorID: mail.authorID,
-                  decrypted: true,
-                  direction: "outgoing",
-                  forward: mail.forward,
-                  group: mail.group ? uuid.stringify(mail.group) : null,
-                  mailID: mail.mailID,
-                  message: XUtils.encodeUTF8(msg),
-                  nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
-                  readerID: mail.readerID,
-                  recipient: mail.recipient,
-                  sender: mail.sender,
-                  timestamp: new Date().toISOString(),
-              };
-        this.emitter.emit("message", outMsg);
-
-        await new Promise((res, rej) => {
-            const callback = (packedMsg: Uint8Array) => {
-                const [_header, receivedMsg] = XUtils.unpackMessage(packedMsg);
-                if (receivedMsg.transmissionID === msgb.transmissionID) {
-                    this.socket.off("message", callback);
-                    const parsed = WSMessageSchema.safeParse(receivedMsg);
-                    if (parsed.success && parsed.data.type === "success") {
-                        res(parsed.data.data);
-                    } else {
-                        rej(
-                            new Error(
-                                "Mail delivery failed: " +
-                                    JSON.stringify(receivedMsg),
-                            ),
-                        );
-                    }
-                }
+            const mail: MailWS = {
+                authorID: this.getUser().userID,
+                cipher,
+                extra,
+                forward,
+                group,
+                mailID: mailID || uuid.v4(),
+                mailType: MailType.subsequent,
+                nonce,
+                readerID: session.userID,
+                recipient: device.deviceID,
+                sender: this.getDevice().deviceID,
             };
-            this.socket.on("message", callback);
-            void this.send(msgb, hmac);
-        });
-        this.sending.delete(device.deviceID);
+
+            const msgb: ResourceMsg = {
+                action: "CREATE",
+                data: mail,
+                resourceType: "mail",
+                transmissionID: uuid.v4(),
+                type: "resource",
+            };
+
+            const hmac = xHMAC(mail, session.SK);
+
+            const fwdOut = forward
+                ? messageSchema.parse(msgpack.decode(msg))
+                : null;
+            const outMsg: Message = fwdOut
+                ? { ...fwdOut, forward: true }
+                : {
+                      authorID: mail.authorID,
+                      decrypted: true,
+                      direction: "outgoing",
+                      forward: mail.forward,
+                      group: mail.group ? uuid.stringify(mail.group) : null,
+                      mailID: mail.mailID,
+                      message: XUtils.encodeUTF8(msg),
+                      nonce: XUtils.encodeHex(new Uint8Array(mail.nonce)),
+                      readerID: mail.readerID,
+                      recipient: mail.recipient,
+                      sender: mail.sender,
+                      timestamp: new Date().toISOString(),
+                  };
+            this.emitter.emit("message", outMsg);
+
+            await new Promise((res, rej) => {
+                const callback = (packedMsg: Uint8Array) => {
+                    const [_header, receivedMsg] =
+                        XUtils.unpackMessage(packedMsg);
+                    if (receivedMsg.transmissionID === msgb.transmissionID) {
+                        this.socket.off("message", callback);
+                        const parsed = WSMessageSchema.safeParse(receivedMsg);
+                        if (parsed.success && parsed.data.type === "success") {
+                            res(parsed.data.data);
+                        } else {
+                            rej(
+                                new Error(
+                                    "Mail delivery failed: " +
+                                        JSON.stringify(receivedMsg),
+                                ),
+                            );
+                        }
+                    }
+                };
+                this.socket.on("message", callback);
+                void this.send(msgb, hmac);
+            });
+        } finally {
+            this.sending.delete(device.deviceID);
+        }
     }
 
     private async sendMessage(userID: string, message: string): Promise<void> {
@@ -3104,31 +3301,42 @@ export class Client {
                 throw new Error("Couldn't get user entry.");
             }
 
-            const deviceList = await this.fetchUserDeviceListWithBackoff(
+            const deviceListRaw = await this.fetchUserDeviceListWithBackoff(
                 userID,
                 "peer",
             );
-            const mailID = uuid.v4();
-            const promises: Array<Promise<void>> = [];
+            if (deviceListRaw.length === 0) {
+                throw new Error(
+                    "No devices for user — cannot send direct message.",
+                );
+            }
+            // Stable order (Peer device list is otherwise DB-order dependent).
+            const deviceList = [...deviceListRaw].sort((a, b) =>
+                a.deviceID.localeCompare(b.deviceID, "en"),
+            );
+            let lastErr: unknown;
+            let failCount = 0;
             for (const device of deviceList) {
-                promises.push(
-                    this.sendMail(
+                const mailID = uuid.v4();
+                try {
+                    await this.sendMail(
                         device,
                         userEntry,
                         XUtils.decodeUTF8(message),
                         null,
                         mailID,
                         false,
-                    ),
-                );
-            }
-            void Promise.allSettled(promises).then((results) => {
-                for (const result of results) {
-                    const { status } = result;
-                    if (status === "rejected") {
-                    }
+                    );
+                } catch (e) {
+                    lastErr = e;
+                    failCount += 1;
                 }
-            });
+            }
+            if (failCount === deviceList.length) {
+                throw lastErr instanceof Error
+                    ? lastErr
+                    : new Error(String(lastErr));
+            }
         } catch (err: unknown) {
             throw err;
         }
@@ -3155,7 +3363,7 @@ export class Client {
         const otks: UnsavedPreKey[] = [];
 
         for (let i = 0; i < amount; i++) {
-            otks[i] = this.createPreKey();
+            otks.push(await this.createPreKey());
         }
 
         const savedKeys = await this.database.savePreKeys(otks, true);

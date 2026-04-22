@@ -15,7 +15,7 @@ import * as path from "node:path";
  * Stores credentials as encrypted files on disk using XUtils.encryptKeyData.
  * Node-only — imports node:fs.
  */
-import { XUtils } from "@vex-chat/crypto";
+import { getCryptoProfile, XUtils } from "@vex-chat/crypto";
 
 export class NodeKeyStore implements KeyStore {
     private readonly dir: string;
@@ -43,7 +43,7 @@ export class NodeKeyStore implements KeyStore {
 
     load(username?: string): Promise<null | StoredCredentials> {
         if (username) {
-            return Promise.resolve(this.readFile(this.filePath(username)));
+            return this.readFile(this.filePath(username));
         }
         // Find most recent .vex file in the directory
         try {
@@ -58,32 +58,40 @@ export class NodeKeyStore implements KeyStore {
             if (files.length === 0) return Promise.resolve(null);
             const newest = files[0];
             if (!newest) return Promise.resolve(null);
-            return Promise.resolve(
-                this.readFile(path.join(this.dir, newest.name)),
-            );
+            return this.readFile(path.join(this.dir, newest.name));
         } catch {
             return Promise.resolve(null);
         }
     }
 
-    save(creds: StoredCredentials): Promise<void> {
+    async save(creds: StoredCredentials): Promise<void> {
         const data = JSON.stringify(creds);
-        const encrypted = XUtils.encryptKeyData(this.passphrase, data);
+        const encrypted =
+            getCryptoProfile() === "fips"
+                ? await XUtils.encryptKeyDataAsync(this.passphrase, data)
+                : XUtils.encryptKeyData(this.passphrase, data);
         fs.writeFileSync(this.filePath(creds.username), encrypted);
-        return Promise.resolve();
     }
 
     private filePath(username: string): string {
         return path.join(this.dir, `${username}.vex`);
     }
 
-    private readFile(filePath: string): null | StoredCredentials {
+    private async readFile(
+        filePath: string,
+    ): Promise<null | StoredCredentials> {
         try {
             const data = fs.readFileSync(filePath);
-            const decrypted = XUtils.decryptKeyData(
-                new Uint8Array(data),
-                this.passphrase,
-            );
+            const decrypted =
+                getCryptoProfile() === "fips"
+                    ? await XUtils.decryptKeyDataAsync(
+                          new Uint8Array(data),
+                          this.passphrase,
+                      )
+                    : XUtils.decryptKeyData(
+                          new Uint8Array(data),
+                          this.passphrase,
+                      );
             const parsed: unknown = JSON.parse(decrypted);
             if (isStoredCredentials(parsed)) {
                 return parsed;

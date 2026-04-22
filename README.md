@@ -98,7 +98,9 @@ npm run license:check   # license allowlist gate
 npm run docs            # typedoc — writes ./docs
 ```
 
-The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm run test:e2e`) requires a running spire server — set `VEX_API_URL` to point at it (defaults to `localhost`).
+The unit suite (`npm test`) runs browser-safe and offline. The e2e suite (`npm run test:e2e`) needs a running Spire when you point tests at it.
+
+**Applications** using `@vex-chat/libvex` configure the client with **`ClientOptions`** only (e.g. `host`, `unsafeHttp`, `devApiKey`, `cryptoProfile`)—the library does not read `.env` or any environment variables. **This repository’s e2e tests** (not the published API) can use `API_URL` / `DEV_API_KEY` in your shell or CI when you run `vitest`. When `API_URL` points at Spire, the suite **reads** `GET …/status` to pick the same `cryptoProfile` (tweetnacl vs fips) as the server, so you usually do not set `LIBVEX_E2E_CRYPTO` by hand. There is no separate `.env` contract for the npm package.
 
 See [AGENTS.md](./AGENTS.md) for the release flow (changesets → publish) and the rules for writing changesets.
 
