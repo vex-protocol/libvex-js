@@ -64,6 +64,14 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
+    /**
+     * Read `closing` where TypeScript would incorrectly assume it cannot
+     * become true after an earlier guard (e.g. across `await`).
+     */
+    private isClosingNow(): boolean {
+        return this.closing;
+    }
+
     async close(): Promise<void> {
         this.closing = true;
         const pending = this.initInFlight;
@@ -438,7 +446,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
     // ── Devices ──────────────────────────────────────────────────────────────
 
     async saveMessage(message: Message): Promise<void> {
-        if (this.closing) {
+        if (this.isClosingNow()) {
             return;
         }
 
@@ -455,6 +463,9 @@ export class SqliteStorage extends EventEmitter implements Storage {
                   XUtils.decodeHex(message.nonce),
                   this.atRestAesKey,
               );
+        if (this.isClosingNow()) {
+            return;
+        }
         const encryptedMessage = XUtils.encodeHex(ct);
 
         try {
@@ -478,6 +489,8 @@ export class SqliteStorage extends EventEmitter implements Storage {
         } catch (err: unknown) {
             if (this.isDuplicateError(err)) {
                 // duplicate nonce — ignore
+            } else if (this.isClosingNow() || this.isTornDownError(err)) {
+                // e.g. WS/mail still saving after `close()` destroyed the driver
             } else {
                 throw err;
             }
@@ -615,6 +628,22 @@ export class SqliteStorage extends EventEmitter implements Storage {
         }
         if (typeof err === "object" && err !== null && "errno" in err) {
             return err.errno === 19;
+        }
+        return false;
+    }
+
+    /**
+     * After `close` runs, Kysely / better-sqlite3 can reject with this if a
+     * message handler is still in flight.
+     */
+    private isTornDownError(err: unknown): boolean {
+        if (err instanceof Error) {
+            const m = err.message.toLowerCase();
+            return (
+                m.includes("driver has already been destroyed") ||
+                m.includes("connection is not open") ||
+                m.includes("database is closed")
+            );
         }
         return false;
     }

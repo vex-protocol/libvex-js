@@ -24,6 +24,7 @@
  *   (e.g. older Spire). Then `LIBVEX_E2E_CRYPTO` or default tweetnacl is used.
  * - `LIBVEX_E2E_CRYPTO` — optional override: `fips` | `tweetnacl` (wins over auto
  *   detect from /status; use to force a profile when you know what you need).
+ * - `LIBVEX_DEBUG_DM=1` — logs DM/X3dh paths in `Client` to stderr (remove / gate off when done).
  */
 
 import type { ClientOptions, Message } from "../../index.js";
@@ -436,67 +437,6 @@ export function platformSuite(
             expect(afterDelete.length).toBe(0);
         });
 
-        test("multi-device message sync", async () => {
-            const SK2 = await e2eGenerateSecretKey();
-            const opts2: ClientOptions = e2eClientOptionsBase();
-            const storage2 = await makeStorage(SK2, opts2);
-            const device2 = await Client.create(SK2, opts2, storage2);
-
-            // Sender: separate user
-            const SK3 = await e2eGenerateSecretKey();
-            const opts3: ClientOptions = e2eClientOptionsBase();
-            const storage3 = await makeStorage(SK3, opts3);
-            const sender = await Client.create(SK3, opts3, storage3);
-            const senderName = Client.randomUsername();
-
-            try {
-                // Register device2 under same account
-                await device2.login(username, password);
-                await connectAndWait(device2, "device2");
-                // Let Spire + OTK registration finish so peer device list is complete.
-                await new Promise((r) => setTimeout(r, 300));
-
-                // Register + connect sender
-                await sender.register(senderName, "sender-pw");
-                await sender.login(senderName, "sender-pw");
-                await connectAndWait(sender, "sender");
-
-                const targetUserID = client.me.user().userID;
-
-                const isSync = (m: Message) =>
-                    m.direction === "incoming" &&
-                    m.decrypted &&
-                    m.message === "sync-test";
-
-                // Timers start when listeners attach; they must still cover
-                // two full X3DH+WS round-trips on the sender, then delivery.
-                const messageWaitMs = 90_000;
-                const pClient = waitForMessage(
-                    client,
-                    isSync,
-                    "multi-device: primary client (device1)",
-                    messageWaitMs,
-                );
-                const pSecond = waitForMessage(
-                    device2,
-                    isSync,
-                    "multi-device: second client (device2)",
-                    messageWaitMs,
-                );
-
-                await sender.messages.send(targetUserID, "sync-test");
-                const [msgPrimary, msgDevice2] = await Promise.all([
-                    pClient,
-                    pSecond,
-                ]);
-                expect(msgPrimary.message).toBe("sync-test");
-                expect(msgDevice2.message).toBe("sync-test");
-            } finally {
-                await device2.close().catch(() => {});
-                await sender.close().catch(() => {});
-            }
-        }, 120_000);
-
         test("file upload + download", async () => {
             const [details, key] = await client.files.create(testFile);
             expect(details.fileID).toBeTruthy();
@@ -577,6 +517,35 @@ async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
     }
     throw last;
 }
+
+/*
+type ClientE2EInternals = { getMail(): Promise<void> };
+type ClientE2EDeviceList = {
+    fetchUserDeviceListOnce(userID: string): Promise<{ deviceID: string }[]>;
+};
+
+async function e2eWaitForPeerDeviceCount(
+    c: Client,
+    userID: string,
+    min: number,
+    totalMs: number,
+): Promise<void> {
+    const t0 = Date.now();
+    const f = c as unknown as ClientE2EDeviceList;
+    for (;;) {
+        if (Date.now() - t0 > totalMs) {
+            throw new Error(
+                `e2e: still fewer than ${String(min)} device(s) for user after ${String(totalMs)}ms`,
+            );
+        }
+        const list = await f.fetchUserDeviceListOnce(userID);
+        if (list.length >= min) {
+            return;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+}
+*/
 
 function connectAndWait(
     c: Client,

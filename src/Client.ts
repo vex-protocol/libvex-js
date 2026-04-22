@@ -93,6 +93,30 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Set `LIBVEX_DEBUG_DM=1` (e.g. in vitest / shell) to log DM multi-device / X3DH paths. */
+function libvexDebugDmEnabled(): boolean {
+    try {
+        return (
+            typeof process !== "undefined" &&
+            process["env"]["LIBVEX_DEBUG_DM"] === "1"
+        );
+    } catch {
+        return false;
+    }
+}
+
+function debugLibvexDm(
+    msg: string,
+    data?: Record<string, string | number | boolean | null | undefined>,
+): void {
+    if (!libvexDebugDmEnabled()) {
+        return;
+    }
+    const payload = data ? `${msg} ${JSON.stringify(data)}` : msg;
+    // eslint-disable-next-line no-console -- gated by LIBVEX_DEBUG_DM; remove when debugging is done
+    console.error(`[libvex:debug-dm] ${payload}`);
+}
+
 import { msgpack } from "./codec.js";
 import {
     ActionTokenCodec,
@@ -902,6 +926,11 @@ export class Client {
     private readonly mailInterval?: NodeJS.Timeout;
 
     private manuallyClosing: boolean = false;
+    /**
+     * Bumped when the WebSocket is torn down and re-opened so the previous
+     * `postAuth` loop exits instead of overlapping a new one.
+     */
+    private postAuthVersion = 0;
     /* Retrieves the userID with the user identifier.
     user identifier is checked for userID, then signkey,
     and finally falls back to username. */
@@ -1285,6 +1314,54 @@ export class Client {
         this.initSocket();
         // Yield the event loop so the WS open callback fires and sends the
         // auth message before OTK generation blocks for ~5s on mobile.
+        await new Promise((r) => setTimeout(r, 0));
+        await this.negotiateOTK();
+    }
+
+    /**
+     * Tears down the current WebSocket and opens a new one, keeping the same
+     * session (user + device in storage). Restarts the post-auth mail loop.
+     * Use for long-running processes or e2e where a fresh socket matches a
+     * newly-registered second device.
+     */
+    public async reconnectWebsocket(): Promise<void> {
+        this.postAuthVersion++;
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
+        this.socket.close();
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const t = setTimeout(() => {
+                    this.off("connected", onC);
+                    reject(
+                        new Error(
+                            "reconnectWebsocket: timed out waiting for authorized",
+                        ),
+                    );
+                }, 15_000);
+                const onC = () => {
+                    clearTimeout(t);
+                    this.off("connected", onC);
+                    resolve();
+                };
+                this.on("connected", onC);
+                try {
+                    this.initSocket();
+                } catch (err: unknown) {
+                    clearTimeout(t);
+                    this.off("connected", onC);
+                    const e =
+                        err instanceof Error
+                            ? err
+                            : new Error(String(err), { cause: err });
+                    reject(e);
+                }
+            });
+        } catch (e: unknown) {
+            throw e instanceof Error ? e : new Error(String(e), { cause: e });
+        }
         await new Promise((r) => setTimeout(r, 0));
         await this.negotiateOTK();
     }
@@ -2142,16 +2219,49 @@ export class Client {
                 .parse(msgpack.decode(mailBuffer));
             const inbox = rawInbox.sort((a, b) => b[2].localeCompare(a[2]));
 
+            if (libvexDebugDmEnabled()) {
+                const did = (() => {
+                    try {
+                        return this.getDevice().deviceID;
+                    } catch {
+                        return "(no device)";
+                    }
+                })();
+                debugLibvexDm("getMail: inbox", {
+                    deviceID: did,
+                    count: String(inbox.length),
+                });
+            }
+
             for (const mailDetails of inbox) {
                 const [mailHeader, mailBody, timestamp] = mailDetails;
                 try {
+                    if (libvexDebugDmEnabled()) {
+                        debugLibvexDm("getMail: readMail one", {
+                            mailID: mailBody.mailID,
+                            type: String(mailBody.mailType),
+                            recipient: mailBody.recipient,
+                        });
+                    }
                     await this.readMail(mailHeader, mailBody, timestamp);
-                } catch (_readMailErr) {
-                    // non-fatal — inspect _readMailErr in a debugger
+                } catch (readMailErr) {
+                    if (libvexDebugDmEnabled()) {
+                        // eslint-disable-next-line no-console -- LIBVEX_DEBUG_DM only
+                        console.error(
+                            "[libvex:debug-dm] readMail threw",
+                            readMailErr,
+                        );
+                    }
                 }
             }
-        } catch (_fetchErr) {
-            // non-fatal — inspect _fetchErr in a debugger
+        } catch (fetchErr) {
+            if (libvexDebugDmEnabled()) {
+                // eslint-disable-next-line no-console -- LIBVEX_DEBUG_DM only
+                console.error(
+                    "[libvex:debug-dm] getMail fetch failed",
+                    fetchErr,
+                );
+            }
         }
         this.fetchingMail = false;
     }
@@ -2591,9 +2701,13 @@ export class Client {
     }
 
     private async postAuth() {
+        const versionAtStart = this.postAuthVersion;
         let count = 0;
         for (;;) {
             if (this.isManualCloseInFlight()) {
+                return;
+            }
+            if (this.postAuthVersion !== versionAtStart) {
                 return;
             }
             try {
@@ -2609,10 +2723,16 @@ export class Client {
             if (this.isManualCloseInFlight()) {
                 return;
             }
+            if (this.postAuthVersion !== versionAtStart) {
+                return;
+            }
             // Chunk the idle delay so `close()` can unwind instead of waiting
             // out one full 60s timer (which would keep the process alive).
             for (let i = 0; i < 60; i++) {
                 if (this.isManualCloseInFlight()) {
+                    return;
+                }
+                if (this.postAuthVersion !== versionAtStart) {
                     return;
                 }
                 await sleep(1000);
@@ -2630,11 +2750,28 @@ export class Client {
         timestamp: string,
     ) {
         if (this.seenMailIDs.has(mail.mailID)) {
+            if (libvexDebugDmEnabled()) {
+                try {
+                    debugLibvexDm("readMail: skip (seen mailID)", {
+                        mailID: mail.mailID,
+                        thisDevice: this.getDevice().deviceID,
+                    });
+                } catch {
+                    debugLibvexDm("readMail: skip (seen mailID)", {
+                        mailID: mail.mailID,
+                    });
+                }
+            }
             return;
         }
         this.seenMailIDs.add(mail.mailID);
 
         if (this.manuallyClosing) {
+            if (libvexDebugDmEnabled()) {
+                debugLibvexDm("readMail: skip (manually closing)", {
+                    mailID: mail.mailID,
+                });
+            }
             return;
         }
 
@@ -2694,6 +2831,29 @@ export class Client {
                                   );
 
                         if (otk?.index !== preKeyIndex && preKeyIndex !== 0) {
+                            if (libvexDebugDmEnabled()) {
+                                try {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (otk index mismatch)",
+                                        {
+                                            mailID: mail.mailID,
+                                            preKeyIndex: String(preKeyIndex),
+                                            otkIndex: String(
+                                                otk?.index ?? "null",
+                                            ),
+                                            thisDevice:
+                                                this.getDevice().deviceID,
+                                        },
+                                    );
+                                } catch {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (otk index mismatch)",
+                                        {
+                                            mailID: mail.mailID,
+                                        },
+                                    );
+                                }
+                            }
                             return;
                         }
 
@@ -2712,11 +2872,39 @@ export class Client {
                                   return c;
                               })();
                         if (!IK_A) {
+                            if (libvexDebugDmEnabled()) {
+                                try {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (IK_A null, Ed→X25519?)",
+                                        {
+                                            mailID: mail.mailID,
+                                            fips: String(fipsRead),
+                                            thisDevice:
+                                                this.getDevice().deviceID,
+                                        },
+                                    );
+                                } catch {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (IK_A null)",
+                                        {
+                                            mailID: mail.mailID,
+                                        },
+                                    );
+                                }
+                            }
                             return;
                         }
                         const EK_A = ephKey;
 
                         if (!this.xKeyRing) {
+                            if (libvexDebugDmEnabled()) {
+                                debugLibvexDm(
+                                    "readMail initial: abort (no xKeyRing)",
+                                    {
+                                        mailID: mail.mailID,
+                                    },
+                                );
+                            }
                             return;
                         }
                         // my private keys
@@ -2752,6 +2940,26 @@ export class Client {
                               );
 
                         if (!XUtils.bytesEqual(hmac, header)) {
+                            if (libvexDebugDmEnabled()) {
+                                try {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (HMAC mismatch)",
+                                        {
+                                            mailID: mail.mailID,
+                                            preKeyIndex: String(preKeyIndex),
+                                            thisDevice:
+                                                this.getDevice().deviceID,
+                                        },
+                                    );
+                                } catch {
+                                    debugLibvexDm(
+                                        "readMail initial: abort (HMAC mismatch)",
+                                        {
+                                            mailID: mail.mailID,
+                                        },
+                                    );
+                                }
+                            }
                             return;
                         }
                         const unsealed = await xSecretboxOpenAsync(
@@ -2791,9 +2999,37 @@ export class Client {
                                   };
 
                             this.emitter.emit("message", message);
+                            if (libvexDebugDmEnabled()) {
+                                try {
+                                    debugLibvexDm(
+                                        "readMail initial: ok (emit message)",
+                                        {
+                                            mailID: mail.mailID,
+                                            preKeyIndex: String(preKeyIndex),
+                                            thisDevice:
+                                                this.getDevice().deviceID,
+                                            plaintextLen: String(
+                                                plaintext.length,
+                                            ),
+                                        },
+                                    );
+                                } catch {
+                                    debugLibvexDm(
+                                        "readMail initial: ok (emit message)",
+                                        {
+                                            mailID: mail.mailID,
+                                        },
+                                    );
+                                }
+                            }
 
-                            // discard onetimekey
-                            await this.database.deleteOneTimeKey(preKeyIndex);
+                            // preKeyIndex 0 = med prekey only (no OTK in the X3DH path). Do
+                            // not call deleteOneTimeKey(0) — that is not "remove OTK row 0".
+                            if (preKeyIndex !== 0) {
+                                await this.database.deleteOneTimeKey(
+                                    preKeyIndex,
+                                );
+                            }
 
                             const deviceEntry = await this.getDeviceByID(
                                 mail.sender,
@@ -2835,6 +3071,15 @@ export class Client {
                             } else {
                             }
                         } else {
+                            if (libvexDebugDmEnabled()) {
+                                debugLibvexDm(
+                                    "readMail initial: abort (xSecretboxOpen null)",
+                                    {
+                                        mailID: mail.mailID,
+                                        preKeyIndex: String(preKeyIndex),
+                                    },
+                                );
+                            }
                         }
                         break;
                     case MailType.subsequent: {
@@ -3200,6 +3445,13 @@ export class Client {
             );
 
             if (!session || retry) {
+                if (libvexDebugDmEnabled()) {
+                    debugLibvexDm("sendMail: createSession path", {
+                        peerDevice: device.deviceID,
+                        retry: String(retry),
+                        hasSession: String(!!session),
+                    });
+                }
                 await this.createSession(
                     device,
                     user,
@@ -3209,7 +3461,18 @@ export class Client {
                     forward,
                     false,
                 );
+                if (libvexDebugDmEnabled()) {
+                    debugLibvexDm("sendMail: createSession returned", {
+                        peerDevice: device.deviceID,
+                    });
+                }
                 return;
+            }
+
+            if (libvexDebugDmEnabled()) {
+                debugLibvexDm("sendMail: subsequent path", {
+                    peerDevice: device.deviceID,
+                });
             }
 
             const nonce = xMakeNonce();
@@ -3301,10 +3564,27 @@ export class Client {
                 throw new Error("Couldn't get user entry.");
             }
 
-            const deviceListRaw = await this.fetchUserDeviceListWithBackoff(
+            const afterBackoff = await this.fetchUserDeviceListWithBackoff(
                 userID,
                 "peer",
             );
+            // Back-to-back GETs, merged by deviceID: a second read can list a device
+            // that was not visible in the first snapshot (automation + multi-device)
+            // without adding a fixed sleep.
+            let deviceListRaw: Device[] = afterBackoff;
+            try {
+                const again = await this.fetchUserDeviceListOnce(userID);
+                const byId = new Map<string, Device>();
+                for (const d of afterBackoff) {
+                    byId.set(d.deviceID, d);
+                }
+                for (const d of again) {
+                    byId.set(d.deviceID, d);
+                }
+                deviceListRaw = [...byId.values()];
+            } catch {
+                deviceListRaw = afterBackoff;
+            }
             if (deviceListRaw.length === 0) {
                 throw new Error(
                     "No devices for user — cannot send direct message.",
@@ -3314,11 +3594,34 @@ export class Client {
             const deviceList = [...deviceListRaw].sort((a, b) =>
                 a.deviceID.localeCompare(b.deviceID, "en"),
             );
+            if (libvexDebugDmEnabled()) {
+                debugLibvexDm(
+                    "sendMessage: peer device list (merged, sorted)",
+                    {
+                        userID,
+                        nAfterBackoff: String(afterBackoff.length),
+                        nMerged: String(deviceListRaw.length),
+                        nSorted: String(deviceList.length),
+                        ourDevice: this.getDevice().deviceID,
+                    },
+                );
+                for (const [i, d] of deviceList.entries()) {
+                    debugLibvexDm(`sendMessage: device[${String(i)}]`, {
+                        deviceID: d.deviceID,
+                    });
+                }
+            }
             let lastErr: unknown;
             let failCount = 0;
             for (const device of deviceList) {
                 const mailID = uuid.v4();
                 try {
+                    if (libvexDebugDmEnabled()) {
+                        debugLibvexDm("sendMessage: sendMail start", {
+                            recipientDevice: device.deviceID,
+                            mailID,
+                        });
+                    }
                     await this.sendMail(
                         device,
                         userEntry,
@@ -3327,15 +3630,40 @@ export class Client {
                         mailID,
                         false,
                     );
+                    if (libvexDebugDmEnabled()) {
+                        debugLibvexDm("sendMessage: sendMail ok", {
+                            recipientDevice: device.deviceID,
+                        });
+                    }
                 } catch (e) {
+                    if (libvexDebugDmEnabled()) {
+                        // eslint-disable-next-line no-console -- LIBVEX_DEBUG_DM only
+                        console.error(
+                            "[libvex:debug-dm] sendMessage: sendMail failed for device",
+                            device.deviceID,
+                            e,
+                        );
+                    }
                     lastErr = e;
                     failCount += 1;
                 }
             }
-            if (failCount === deviceList.length) {
-                throw lastErr instanceof Error
-                    ? lastErr
-                    : new Error(String(lastErr));
+            if (failCount > 0) {
+                const base =
+                    lastErr instanceof Error
+                        ? lastErr
+                        : new Error(String(lastErr));
+                if (failCount === deviceList.length) {
+                    throw base;
+                }
+                // Multi-device: do not “succeed” when only one device of several got mail —
+                // callers and tests have no per-device result and the other copy times out.
+                const partial = new Error(
+                    `Direct message failed to reach ${String(failCount)} of ` +
+                        `${String(deviceList.length)} peer device(s) (X3DH/post).`,
+                );
+                partial.cause = base;
+                throw partial;
             }
         } catch (err: unknown) {
             throw err;
