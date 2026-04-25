@@ -93,6 +93,62 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+    return typeof x === "object" && x !== null;
+}
+
+/**
+ * Spire 5+ JSON error bodies use `{ "error": { "message", "requestId"?, "details"? } }`.
+ * Responses are `arraybuffer` — decode UTF-8 and parse for a one-line `Error` message
+ * (plus requestId) instead of a raw JSON blob.
+ */
+function spireErrorBodyMessage(data: unknown, max = 8_000): string {
+    let text: string;
+    if (data instanceof ArrayBuffer) {
+        text = new TextDecoder("utf-8", { fatal: false }).decode(
+            new Uint8Array(data),
+        );
+    } else if (data instanceof Uint8Array) {
+        text = new TextDecoder("utf-8", { fatal: false }).decode(data);
+    } else {
+        return String(data).slice(0, max);
+    }
+    const t = text.trim();
+    if (t.startsWith("{")) {
+        try {
+            // JSON.parse is typed as any; assign into unknown for safe narrowing.
+            const parsed: unknown = JSON.parse(t);
+            if (!isRecord(parsed)) {
+                return t.length > max ? t.slice(0, max) + "…" : t;
+            }
+            const errField = parsed["error"];
+            if (!isRecord(errField)) {
+                return t.length > max ? t.slice(0, max) + "…" : t;
+            }
+            const message = errField["message"];
+            if (typeof message !== "string") {
+                return t.length > max ? t.slice(0, max) + "…" : t;
+            }
+            const parts: string[] = [message];
+            const requestId = errField["requestId"];
+            if (typeof requestId === "string" && requestId.length > 0) {
+                parts.push(`(requestId: ${requestId})`);
+            }
+            if (errField["details"] !== undefined) {
+                let d = JSON.stringify(errField["details"]);
+                if (d.length > 500) {
+                    d = d.slice(0, 500) + "…";
+                }
+                parts.push(d);
+            }
+            return parts.join(" ");
+        } catch {
+            /* fall through to raw */
+        }
+    }
+    return t.length > max ? t.slice(0, max) + "…" : t;
+}
+
 /** Set `LIBVEX_DEBUG_DM=1` (e.g. in vitest / shell) to log DM multi-device / X3DH paths. */
 function libvexDebugDmEnabled(): boolean {
     try {
@@ -1433,6 +1489,12 @@ export class Client {
             this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
             return { ok: true };
         } catch (err: unknown) {
+            if (isAxiosError(err) && err.response) {
+                return {
+                    error: spireErrorBodyMessage(err.response.data),
+                    ok: false,
+                };
+            }
             const error = err instanceof Error ? err.message : String(err);
             return { error, ok: false };
         }
@@ -1591,12 +1653,10 @@ export class Client {
                 return [this.getUser(), null];
             } catch (err: unknown) {
                 if (isAxiosError(err) && err.response) {
-                    const raw: unknown = err.response.data;
-                    const msg =
-                        raw instanceof ArrayBuffer || raw instanceof Uint8Array
-                            ? new TextDecoder().decode(raw)
-                            : String(raw);
-                    return [null, new Error(msg)];
+                    return [
+                        null,
+                        new Error(spireErrorBodyMessage(err.response.data)),
+                    ];
                 }
                 return [
                     null,
