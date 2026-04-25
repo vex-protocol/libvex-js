@@ -110,7 +110,7 @@
         "vitest": "3.2.4"
     },
     "dependencies": {
-        "@vex-chat/crypto": "2.1.1",
+        "@vex-chat/crypto": "2.1.2",
         "@vex-chat/types": "2.0.0",
         "axios": "1.15.0",
         "eventemitter3": "5.0.4",
