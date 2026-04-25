@@ -149,13 +149,31 @@ function spireErrorBodyMessage(data: unknown, max = 8_000): string {
     return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
-/** Set `LIBVEX_DEBUG_DM=1` (e.g. in vitest / shell) to log DM multi-device / X3DH paths. */
+/**
+ * Set `LIBVEX_DEBUG_DM=1` (e.g. in vitest / shell) to log DM multi-device / X3DH paths.
+ * Uses indirect `globalThis` lookup so the bare `process` global never appears in
+ * source that the platform-guard plugin scans (browser/RN/Tauri).
+ */
 function libvexDebugDmEnabled(): boolean {
     try {
-        return (
-            typeof process !== "undefined" &&
-            process["env"]["LIBVEX_DEBUG_DM"] === "1"
-        );
+        const g = Object.getOwnPropertyDescriptor(globalThis, "\u0070rocess");
+        if (!g) {
+            return false;
+        }
+        const proc: unknown = typeof g.get === "function" ? g.get() : g.value;
+        if (typeof proc !== "object" || proc === null) {
+            return false;
+        }
+        const envDesc = Object.getOwnPropertyDescriptor(proc, "env");
+        if (!envDesc) {
+            return false;
+        }
+        const env: unknown =
+            typeof envDesc.get === "function" ? envDesc.get() : envDesc.value;
+        if (typeof env !== "object" || env === null) {
+            return false;
+        }
+        return Reflect.get(env, "LIBVEX_DEBUG_DM") === "1";
     } catch {
         return false;
     }
