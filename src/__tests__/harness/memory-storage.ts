@@ -14,12 +14,13 @@ import type {
 import type { Device, PreKeysSQL, SessionSQL } from "@vex-chat/types";
 
 import {
-    type KeyPair,
+    getCryptoProfile,
     xBoxKeyPairFromSecret,
-    XKeyConvert,
+    xBoxKeyPairFromSecretAsync,
     xSecretbox,
+    xSecretboxAsync,
     xSecretboxOpen,
-    xSignKeyPairFromSecret,
+    xSecretboxOpenAsync,
     XUtils,
 } from "@vex-chat/crypto";
 
@@ -34,7 +35,7 @@ import { EventEmitter } from "eventemitter3";
 export class MemoryStorage extends EventEmitter implements Storage {
     public ready = false;
     private readonly devices: Device[] = [];
-    private readonly idKeys: KeyPair;
+    private readonly atRestAesKey: Uint8Array;
     private messages: Message[] = [];
     private nextOtkIndex = 1;
     private nextPreKeyIndex = 1;
@@ -42,13 +43,12 @@ export class MemoryStorage extends EventEmitter implements Storage {
     private preKeys: any[] = [];
     private sessions: SessionSQL[] = [];
 
-    constructor(SK: string) {
+    constructor(atRestAesKey: Uint8Array) {
         super();
-        const idKeys = XKeyConvert.convertKeyPair(
-            xSignKeyPairFromSecret(XUtils.decodeHex(SK)),
-        );
-        if (!idKeys) throw new Error("Can't convert SK!");
-        this.idKeys = idKeys;
+        if (atRestAesKey.length !== 32) {
+            throw new Error("MemoryStorage requires a 32-byte atRestAes key.");
+        }
+        this.atRestAesKey = atRestAesKey;
     }
 
     close(): Promise<void> {
@@ -90,49 +90,51 @@ export class MemoryStorage extends EventEmitter implements Storage {
         );
     }
 
-    getGroupHistory(channelID: string): Promise<Message[]> {
-        return Promise.resolve(
-            this.messages
-                .filter((m) => m.group === channelID)
-                .map((m) => this.decryptMessage(m)),
-        );
+    async getGroupHistory(channelID: string): Promise<Message[]> {
+        const rows = this.messages.filter((m) => m.group === channelID);
+        return Promise.all(rows.map((m) => this.decryptMessage(m)));
     }
 
-    getMessageHistory(userID: string): Promise<Message[]> {
-        return Promise.resolve(
-            this.messages
-                .filter(
-                    (m) =>
-                        (m.direction === "incoming" &&
-                            m.authorID === userID &&
-                            !m.group) ||
-                        (m.direction === "outgoing" &&
-                            m.readerID === userID &&
-                            !m.group),
-                )
-                .map((m) => this.decryptMessage(m)),
+    async getMessageHistory(userID: string): Promise<Message[]> {
+        const rows = this.messages.filter(
+            (m) =>
+                (m.direction === "incoming" &&
+                    m.authorID === userID &&
+                    !m.group) ||
+                (m.direction === "outgoing" &&
+                    m.readerID === userID &&
+                    !m.group),
         );
+        return Promise.all(rows.map((m) => this.decryptMessage(m)));
     }
 
-    getOneTimeKey(index: number): Promise<null | PreKeysCrypto> {
+    async getOneTimeKey(index: number): Promise<null | PreKeysCrypto> {
         const otk = this.oneTimeKeys.find((k) => k.index === index);
         if (!otk || !otk.privateKey) return Promise.resolve(null);
-        return Promise.resolve({
+        const sk = XUtils.decodeHex(otk.privateKey);
+        return {
             index: otk.index,
-            keyPair: xBoxKeyPairFromSecret(XUtils.decodeHex(otk.privateKey)),
+            keyPair:
+                getCryptoProfile() === "fips"
+                    ? await xBoxKeyPairFromSecretAsync(sk)
+                    : xBoxKeyPairFromSecret(sk),
             signature: XUtils.decodeHex(otk.signature),
-        });
+        };
     }
 
-    getPreKeys(): Promise<null | PreKeysCrypto> {
+    async getPreKeys(): Promise<null | PreKeysCrypto> {
         if (this.preKeys.length === 0) return Promise.resolve(null);
         const pk = this.preKeys[0];
         if (!pk.privateKey) return Promise.resolve(null);
-        return Promise.resolve({
+        const sk = XUtils.decodeHex(pk.privateKey);
+        return {
             index: pk.index,
-            keyPair: xBoxKeyPairFromSecret(XUtils.decodeHex(pk.privateKey)),
+            keyPair:
+                getCryptoProfile() === "fips"
+                    ? await xBoxKeyPairFromSecretAsync(sk)
+                    : xBoxKeyPairFromSecret(sk),
             signature: XUtils.decodeHex(pk.signature),
-        });
+        };
     }
 
     getSessionByDeviceID(deviceID: string): Promise<null | SessionCrypto> {
@@ -188,17 +190,22 @@ export class MemoryStorage extends EventEmitter implements Storage {
         return Promise.resolve();
     }
 
-    saveMessage(message: Message): Promise<void> {
+    async saveMessage(message: Message): Promise<void> {
         const copy = { ...message };
-        copy.message = XUtils.encodeHex(
-            xSecretbox(
-                XUtils.decodeUTF8(message.message),
-                XUtils.decodeHex(message.nonce),
-                this.idKeys.secretKey,
-            ),
-        );
+        const fips = getCryptoProfile() === "fips";
+        const ct = fips
+            ? await xSecretboxAsync(
+                  XUtils.decodeUTF8(message.message),
+                  XUtils.decodeHex(message.nonce),
+                  this.atRestAesKey,
+              )
+            : xSecretbox(
+                  XUtils.decodeUTF8(message.message),
+                  XUtils.decodeHex(message.nonce),
+                  this.atRestAesKey,
+              );
+        copy.message = XUtils.encodeHex(ct);
         this.messages.push(copy);
-        return Promise.resolve();
     }
 
     savePreKeys(
@@ -233,14 +240,21 @@ export class MemoryStorage extends EventEmitter implements Storage {
         return Promise.resolve();
     }
 
-    private decryptMessage(msg: Message): Message {
+    private async decryptMessage(msg: Message): Promise<Message> {
         const copy = { ...msg };
         if (copy.decrypted) {
-            const dec = xSecretboxOpen(
-                XUtils.decodeHex(copy.message),
-                XUtils.decodeHex(copy.nonce),
-                this.idKeys.secretKey,
-            );
+            const fips = getCryptoProfile() === "fips";
+            const dec = fips
+                ? await xSecretboxOpenAsync(
+                      XUtils.decodeHex(copy.message),
+                      XUtils.decodeHex(copy.nonce),
+                      this.atRestAesKey,
+                  )
+                : xSecretboxOpen(
+                      XUtils.decodeHex(copy.message),
+                      XUtils.decodeHex(copy.nonce),
+                      this.atRestAesKey,
+                  );
             if (dec) copy.message = XUtils.encodeUTF8(dec);
         }
         return copy;

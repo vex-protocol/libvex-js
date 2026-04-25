@@ -16,13 +16,14 @@ import { Kysely, SqliteDialect } from "kysely";
 
 import { SqliteStorage } from "./sqlite.js";
 
-export function createNodeStorage(dbPath: string, SK: string): Storage {
+export function createNodeStorage(
+    dbPath: string,
+    atRestAesKey: Uint8Array,
+): Storage {
     const db = new Kysely<ClientDatabase>({
         dialect: new SqliteDialect({
             database: new BetterSqlite3(dbPath),
         }),
     });
-    const storage = new SqliteStorage(db, SK);
-    void storage.init();
-    return storage;
+    return new SqliteStorage(db, atRestAesKey);
 }

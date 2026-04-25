@@ -31,13 +31,14 @@ import type { Kysely } from "kysely";
  * ExpoStorage) with a single implementation.
  */
 import {
-    type KeyPair,
+    getCryptoProfile,
     xBoxKeyPairFromSecret,
-    XKeyConvert,
+    xBoxKeyPairFromSecretAsync,
     xMakeNonce,
     xSecretbox,
+    xSecretboxAsync,
     xSecretboxOpen,
-    xSignKeyPairFromSecret,
+    xSecretboxOpenAsync,
     XUtils,
 } from "@vex-chat/crypto";
 
@@ -46,26 +47,41 @@ import { EventEmitter } from "eventemitter3";
 export class SqliteStorage extends EventEmitter implements Storage {
     public ready = false;
     private closing = false;
+    /** Shared across concurrent `init()` callers; `close()` awaits it before `destroy()`. */
+    private initInFlight: Promise<void> | null = null;
     private readonly db: Kysely<ClientDatabase>;
-    private readonly idKeys: KeyPair;
+    /** 32-byte AES-256 (or nacl) key for local at-rest `secretbox` (see `XUtils.deriveLocalAtRestAesKey`). */
+    private readonly atRestAesKey: Uint8Array;
 
-    constructor(db: Kysely<ClientDatabase>, SK: string) {
+    constructor(db: Kysely<ClientDatabase>, atRestAesKey: Uint8Array) {
         super();
         this.db = db;
-
-        const idKeys = XKeyConvert.convertKeyPair(
-            xSignKeyPairFromSecret(XUtils.decodeHex(SK)),
-        );
-        if (!idKeys) {
-            throw new Error("Can't convert SK!");
+        if (atRestAesKey.length !== 32) {
+            throw new Error("SqliteStorage requires a 32-byte atRestAes key.");
         }
-        this.idKeys = idKeys;
+        this.atRestAesKey = atRestAesKey;
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
+    /**
+     * Read `closing` where TypeScript would incorrectly assume it cannot
+     * become true after an earlier guard (e.g. across `await`).
+     */
+    private isClosingNow(): boolean {
+        return this.closing;
+    }
+
     async close(): Promise<void> {
         this.closing = true;
+        const pending = this.initInFlight;
+        if (pending) {
+            try {
+                await pending;
+            } catch {
+                // Schema init may have failed; still tear down the driver.
+            }
+        }
         await this.db.destroy();
     }
 
@@ -120,7 +136,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .orderBy("lastUsed", "desc")
             .execute();
 
-        return rows.map((s) => this.sessionRowToSQL(s));
+        return await Promise.all(rows.map((s) => this.sessionRowToSQLAsync(s)));
     }
 
     async getDevice(deviceID: string): Promise<Device | null> {
@@ -149,7 +165,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .orderBy("timestamp", "asc")
             .execute();
 
-        return this.decryptMessages(messages);
+        return this.decryptMessagesAsync(messages);
     }
 
     async getMessageHistory(userID: string): Promise<Message[]> {
@@ -177,7 +193,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             .orderBy("timestamp", "asc")
             .execute();
 
-        return this.decryptMessages(messages);
+        return this.decryptMessagesAsync(messages);
     }
 
     // ── Sessions ─────────────────────────────────────────────────────────────
@@ -198,11 +214,13 @@ export class SqliteStorage extends EventEmitter implements Storage {
         if (!otkInfo) {
             return null;
         }
+        const rawSk = await this.unsealHex(otkInfo.privateKey);
         return {
             index: otkInfo.index,
-            keyPair: xBoxKeyPairFromSecret(
-                XUtils.decodeHex(this.unsealHex(otkInfo.privateKey)),
-            ),
+            keyPair:
+                getCryptoProfile() === "fips"
+                    ? await xBoxKeyPairFromSecretAsync(XUtils.decodeHex(rawSk))
+                    : xBoxKeyPairFromSecret(XUtils.decodeHex(rawSk)),
             signature: XUtils.decodeHex(otkInfo.signature),
         };
     }
@@ -219,11 +237,13 @@ export class SqliteStorage extends EventEmitter implements Storage {
         if (!preKeyInfo) {
             return null;
         }
+        const rawPk = await this.unsealHex(preKeyInfo.privateKey);
         return {
             index: preKeyInfo.index,
-            keyPair: xBoxKeyPairFromSecret(
-                XUtils.decodeHex(this.unsealHex(preKeyInfo.privateKey)),
-            ),
+            keyPair:
+                getCryptoProfile() === "fips"
+                    ? await xBoxKeyPairFromSecretAsync(XUtils.decodeHex(rawPk))
+                    : xBoxKeyPairFromSecret(XUtils.decodeHex(rawPk)),
             signature: XUtils.decodeHex(preKeyInfo.signature),
         };
     }
@@ -247,7 +267,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             return null;
         }
 
-        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
+        return this.sqlToCrypto(await this.sessionRowToSQLAsync(sessionRow));
     }
 
     async getSessionByPublicKey(
@@ -270,89 +290,97 @@ export class SqliteStorage extends EventEmitter implements Storage {
             return null;
         }
 
-        return this.sqlToCrypto(this.sessionRowToSQL(sessionRow));
+        return this.sqlToCrypto(await this.sessionRowToSQLAsync(sessionRow));
     }
 
     async init(): Promise<void> {
-        try {
-            await this.db.schema
-                .createTable("messages")
-                .ifNotExists()
-                .addColumn("nonce", "text", (col) => col.primaryKey())
-                .addColumn("sender", "text")
-                .addColumn("recipient", "text")
-                .addColumn("group", "text")
-                .addColumn("mailID", "text")
-                .addColumn("message", "text")
-                .addColumn("direction", "text")
-                .addColumn("timestamp", "text")
-                .addColumn("decrypted", "integer")
-                .addColumn("forward", "integer")
-                .addColumn("authorID", "text")
-                .addColumn("readerID", "text")
-                .execute();
-
-            await this.db.schema
-                .createTable("devices")
-                .ifNotExists()
-                .addColumn("deviceID", "text", (col) => col.primaryKey())
-                .addColumn("owner", "text")
-                .addColumn("signKey", "text")
-                .addColumn("name", "text")
-                .addColumn("lastLogin", "text")
-                .addColumn("deleted", "integer")
-                .execute();
-
-            await this.db.schema
-                .createTable("sessions")
-                .ifNotExists()
-                .addColumn("sessionID", "text", (col) => col.primaryKey())
-                .addColumn("userID", "text")
-                .addColumn("deviceID", "text")
-                .addColumn("SK", "text", (col) => col.unique())
-                .addColumn("publicKey", "text")
-                .addColumn("fingerprint", "text")
-                .addColumn("mode", "text")
-                .addColumn("lastUsed", "text")
-                .addColumn("verified", "integer")
-                .execute();
-
-            await this.db.schema
-                .createTable("preKeys")
-                .ifNotExists()
-                .addColumn("index", "integer", (col) =>
-                    col.primaryKey().autoIncrement(),
-                )
-                .addColumn("keyID", "text", (col) => col.unique())
-                .addColumn("userID", "text")
-                .addColumn("deviceID", "text")
-                .addColumn("privateKey", "text")
-                .addColumn("publicKey", "text")
-                .addColumn("signature", "text")
-                .execute();
-
-            await this.db.schema
-                .createTable("oneTimeKeys")
-                .ifNotExists()
-                .addColumn("index", "integer", (col) =>
-                    col.primaryKey().autoIncrement(),
-                )
-                .addColumn("keyID", "text", (col) => col.unique())
-                .addColumn("userID", "text")
-                .addColumn("deviceID", "text")
-                .addColumn("privateKey", "text")
-                .addColumn("publicKey", "text")
-                .addColumn("signature", "text")
-                .execute();
-
-            this.ready = true;
-            this.emit("ready");
-        } catch (err: unknown) {
-            this.emit(
-                "error",
-                err instanceof Error ? err : new Error(String(err)),
-            );
+        if (this.ready || this.closing) {
+            return;
         }
+        this.initInFlight ??= (async () => {
+            try {
+                await this.db.schema
+                    .createTable("messages")
+                    .ifNotExists()
+                    .addColumn("nonce", "text", (col) => col.primaryKey())
+                    .addColumn("sender", "text")
+                    .addColumn("recipient", "text")
+                    .addColumn("group", "text")
+                    .addColumn("mailID", "text")
+                    .addColumn("message", "text")
+                    .addColumn("direction", "text")
+                    .addColumn("timestamp", "text")
+                    .addColumn("decrypted", "integer")
+                    .addColumn("forward", "integer")
+                    .addColumn("authorID", "text")
+                    .addColumn("readerID", "text")
+                    .execute();
+
+                await this.db.schema
+                    .createTable("devices")
+                    .ifNotExists()
+                    .addColumn("deviceID", "text", (col) => col.primaryKey())
+                    .addColumn("owner", "text")
+                    .addColumn("signKey", "text")
+                    .addColumn("name", "text")
+                    .addColumn("lastLogin", "text")
+                    .addColumn("deleted", "integer")
+                    .execute();
+
+                await this.db.schema
+                    .createTable("sessions")
+                    .ifNotExists()
+                    .addColumn("sessionID", "text", (col) => col.primaryKey())
+                    .addColumn("userID", "text")
+                    .addColumn("deviceID", "text")
+                    .addColumn("SK", "text", (col) => col.unique())
+                    .addColumn("publicKey", "text")
+                    .addColumn("fingerprint", "text")
+                    .addColumn("mode", "text")
+                    .addColumn("lastUsed", "text")
+                    .addColumn("verified", "integer")
+                    .execute();
+
+                await this.db.schema
+                    .createTable("preKeys")
+                    .ifNotExists()
+                    .addColumn("index", "integer", (col) =>
+                        col.primaryKey().autoIncrement(),
+                    )
+                    .addColumn("keyID", "text", (col) => col.unique())
+                    .addColumn("userID", "text")
+                    .addColumn("deviceID", "text")
+                    .addColumn("privateKey", "text")
+                    .addColumn("publicKey", "text")
+                    .addColumn("signature", "text")
+                    .execute();
+
+                await this.db.schema
+                    .createTable("oneTimeKeys")
+                    .ifNotExists()
+                    .addColumn("index", "integer", (col) =>
+                        col.primaryKey().autoIncrement(),
+                    )
+                    .addColumn("keyID", "text", (col) => col.unique())
+                    .addColumn("userID", "text")
+                    .addColumn("deviceID", "text")
+                    .addColumn("privateKey", "text")
+                    .addColumn("publicKey", "text")
+                    .addColumn("signature", "text")
+                    .execute();
+
+                this.ready = true;
+                this.emit("ready");
+            } catch (err: unknown) {
+                this.emit(
+                    "error",
+                    err instanceof Error ? err : new Error(String(err)),
+                );
+            } finally {
+                this.initInFlight = null;
+            }
+        })();
+        await this.initInFlight;
     }
 
     async markSessionUsed(sessionID: string): Promise<void> {
@@ -418,18 +446,27 @@ export class SqliteStorage extends EventEmitter implements Storage {
     // ── Devices ──────────────────────────────────────────────────────────────
 
     async saveMessage(message: Message): Promise<void> {
-        if (this.closing) {
+        if (this.isClosingNow()) {
             return;
         }
 
-        // Encrypt plaintext with our idkey before saving to disk
-        const encryptedMessage = XUtils.encodeHex(
-            xSecretbox(
-                XUtils.decodeUTF8(message.message),
-                XUtils.decodeHex(message.nonce),
-                this.idKeys.secretKey,
-            ),
-        );
+        // Encrypt plaintext with at-rest key before saving to disk
+        const fips = getCryptoProfile() === "fips";
+        const ct = fips
+            ? await xSecretboxAsync(
+                  XUtils.decodeUTF8(message.message),
+                  XUtils.decodeHex(message.nonce),
+                  this.atRestAesKey,
+              )
+            : xSecretbox(
+                  XUtils.decodeUTF8(message.message),
+                  XUtils.decodeHex(message.nonce),
+                  this.atRestAesKey,
+              );
+        if (this.isClosingNow()) {
+            return;
+        }
+        const encryptedMessage = XUtils.encodeHex(ct);
 
         try {
             await this.db
@@ -452,6 +489,8 @@ export class SqliteStorage extends EventEmitter implements Storage {
         } catch (err: unknown) {
             if (this.isDuplicateError(err)) {
                 // duplicate nonce — ignore
+            } else if (this.isClosingNow() || this.isTornDownError(err)) {
+                // e.g. WS/mail still saving after `close()` destroyed the driver
             } else {
                 throw err;
             }
@@ -474,7 +513,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             const row = await this.db
                 .insertInto(table)
                 .values({
-                    privateKey: this.sealHex(
+                    privateKey: await this.sealHex(
                         XUtils.encodeHex(preKey.keyPair.secretKey),
                     ),
                     publicKey: XUtils.encodeHex(preKey.keyPair.publicKey),
@@ -512,7 +551,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
                     mode: session.mode,
                     publicKey: session.publicKey,
                     sessionID: session.sessionID,
-                    SK: this.sealHex(session.SK),
+                    SK: await this.sealHex(session.SK),
                     userID: session.userID,
                     verified: session.verified ? 1 : 0,
                 })
@@ -528,28 +567,33 @@ export class SqliteStorage extends EventEmitter implements Storage {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private decryptMessages(messages: MessageRow[]): Message[] {
-        return messages.map((msg): Message => {
+    private async decryptMessagesAsync(
+        messages: MessageRow[],
+    ): Promise<Message[]> {
+        const fips = getCryptoProfile() === "fips";
+        const out: Message[] = [];
+        for (const msg of messages) {
             const decryptedFlag = msg.decrypted !== 0;
             let plaintext = msg.message;
-
             if (decryptedFlag) {
-                const decrypted = xSecretboxOpen(
-                    XUtils.decodeHex(msg.message),
-                    XUtils.decodeHex(msg.nonce),
-                    this.idKeys.secretKey,
-                );
+                const cipher = XUtils.decodeHex(msg.message);
+                const nonce = XUtils.decodeHex(msg.nonce);
+                const decrypted = fips
+                    ? await xSecretboxOpenAsync(
+                          cipher,
+                          nonce,
+                          this.atRestAesKey,
+                      )
+                    : xSecretboxOpen(cipher, nonce, this.atRestAesKey);
                 if (decrypted) {
                     plaintext = XUtils.encodeUTF8(decrypted);
                 } else {
                     throw new Error("Couldn't decrypt messages on disk!");
                 }
             }
-
             const direction =
                 msg.direction === "incoming" ? "incoming" : "outgoing";
-
-            return {
+            out.push({
                 authorID: msg.authorID,
                 decrypted: decryptedFlag,
                 direction,
@@ -562,8 +606,9 @@ export class SqliteStorage extends EventEmitter implements Storage {
                 recipient: msg.recipient,
                 sender: msg.sender,
                 timestamp: msg.timestamp,
-            };
-        });
+            });
+        }
+        return out;
     }
 
     private deviceRowToDevice(row: DeviceRow): Device {
@@ -588,23 +633,42 @@ export class SqliteStorage extends EventEmitter implements Storage {
     }
 
     /**
+     * After `close` runs, Kysely / better-sqlite3 can reject with this if a
+     * message handler is still in flight.
+     */
+    private isTornDownError(err: unknown): boolean {
+        if (err instanceof Error) {
+            const m = err.message.toLowerCase();
+            return (
+                m.includes("driver has already been destroyed") ||
+                m.includes("connection is not open") ||
+                m.includes("database is closed")
+            );
+        }
+        return false;
+    }
+
+    /**
      * Encrypt a hex-encoded secret for at-rest storage.
      * Returns hex(nonce || ciphertext) where nonce is 24 random bytes.
      */
-    private sealHex(plainHex: string): string {
+    private async sealHex(plainHex: string): Promise<string> {
         const nonce = xMakeNonce();
-        const ct = xSecretbox(
-            XUtils.decodeHex(plainHex),
-            nonce,
-            this.idKeys.secretKey,
-        );
+        const fips = getCryptoProfile() === "fips";
+        const ct = fips
+            ? await xSecretboxAsync(
+                  XUtils.decodeHex(plainHex),
+                  nonce,
+                  this.atRestAesKey,
+              )
+            : xSecretbox(XUtils.decodeHex(plainHex), nonce, this.atRestAesKey);
         const sealed = new Uint8Array(nonce.length + ct.length);
         sealed.set(nonce);
         sealed.set(ct, nonce.length);
         return XUtils.encodeHex(sealed);
     }
 
-    private sessionRowToSQL(row: SessionRow): SessionSQL {
+    private async sessionRowToSQLAsync(row: SessionRow): Promise<SessionSQL> {
         return {
             deviceID: row.deviceID,
             fingerprint: row.fingerprint,
@@ -612,7 +676,7 @@ export class SqliteStorage extends EventEmitter implements Storage {
             mode: row.mode === "initiator" ? "initiator" : "receiver",
             publicKey: row.publicKey,
             sessionID: row.sessionID,
-            SK: this.unsealHex(row.SK),
+            SK: await this.unsealHex(row.SK),
             userID: row.userID,
             verified: row.verified !== 0,
         };
@@ -634,11 +698,14 @@ export class SqliteStorage extends EventEmitter implements Storage {
      * Decrypt a value produced by sealHex().
      * Expects hex(nonce || ciphertext), returns the original hex string.
      */
-    private unsealHex(sealed: string): string {
+    private async unsealHex(sealed: string): Promise<string> {
         const bytes = XUtils.decodeHex(sealed);
         const nonce = bytes.slice(0, 24);
         const ct = bytes.slice(24);
-        const plain = xSecretboxOpen(ct, nonce, this.idKeys.secretKey);
+        const fips = getCryptoProfile() === "fips";
+        const plain = fips
+            ? await xSecretboxOpenAsync(ct, nonce, this.atRestAesKey)
+            : xSecretboxOpen(ct, nonce, this.atRestAesKey);
         if (!plain) {
             throw new Error("Failed to decrypt sealed column value.");
         }

@@ -9,16 +9,169 @@
  * with a different adapter factory.
  *
  * Runs register → login → connect → send/receive DM against a real spire.
+ *
+ * **Vitest e2e only** — the published `Client` does not read the environment;
+ * app code passes `ClientOptions` (`host`, `devApiKey`, `cryptoProfile`, …).
+ * These `process.env` values are for running **this** repo’s platform tests
+ * (shell, CI, or your own env injection — not a “libvex .env” contract).
+ * - `API_URL` — Spire base, e.g. `http://127.0.0.1:16777` or `host:port` (http assumed).
+ *   When set, `beforeAll` reads `GET …/status` `cryptoProfile` and **sets the
+ *   test process to match** (so a FIPS Spire does not require a separate client flag).
+ *   A post-check then fails if the client and server still disagree.
+ * - `DEV_API_KEY` — must match the Spire `DEV_API_KEY` so the client can send
+ *   `x-dev-api-key` and avoid dev rate limits.
+ * - `LIBVEX_E2E_SKIP_STATUS_CHECK=1` — opt out of the /status profile read + check
+ *   (e.g. older Spire). Then `LIBVEX_E2E_CRYPTO` or default tweetnacl is used.
+ * - `LIBVEX_E2E_CRYPTO` — optional override: `fips` | `tweetnacl` (wins over auto
+ *   detect from /status; use to force a profile when you know what you need).
+ * - `LIBVEX_DEBUG_DM=1` — logs DM/X3dh paths in `Client` to stderr (remove / gate off when done).
  */
 
 import type { ClientOptions, Message } from "../../index.js";
 import type { Storage } from "../../Storage.js";
+
+import { getCryptoProfile, setCryptoProfile } from "@vex-chat/crypto";
 
 import { isAxiosError } from "axios";
 
 import { Client } from "../../index.js";
 
 import { testFile, testImage } from "./fixtures.js";
+
+/**
+ * `GET` `{API_URL or http://}{host}/status` — used for crypto profile preflight
+ * (must match `getCryptoProfile()` when running e2e against a custom Spire).
+ */
+function spireStatusUrlFromEnv(): null | string {
+    const raw = process.env["API_URL"]?.trim();
+    if (raw === undefined || raw.length === 0) {
+        return null;
+    }
+    if (/^https?:\/\//i.test(raw)) {
+        const u = new URL(raw);
+        return `${u.protocol}//${u.host}/status`;
+    }
+    return `http://${raw}/status`;
+}
+
+/** `LIBVEX_E2E_CRYPTO` only — used when status auto-detect is skipped. */
+function e2eCryptoProfileFromEnvOnly(): "fips" | "tweetnacl" {
+    const v = process.env["LIBVEX_E2E_CRYPTO"]?.trim().toLowerCase();
+    if (v === "fips" || v === "p-256" || v === "p256") {
+        return "fips";
+    }
+    if (v === "tweetnacl" || v === "nacl" || v === "ed25519") {
+        return "tweetnacl";
+    }
+    return "tweetnacl";
+}
+
+/**
+ * Picks the signing profile for the suite: optional env override, else `GET` Spire
+ * `/status` when `API_URL` is set, else tweetnacl.
+ */
+async function resolveE2eCryptoProfile(): Promise<"fips" | "tweetnacl"> {
+    if (process.env["LIBVEX_E2E_SKIP_STATUS_CHECK"] === "1") {
+        return e2eCryptoProfileFromEnvOnly();
+    }
+    const v = process.env["LIBVEX_E2E_CRYPTO"]?.trim().toLowerCase();
+    if (v === "fips" || v === "p-256" || v === "p256") {
+        return "fips";
+    }
+    if (v === "tweetnacl" || v === "nacl" || v === "ed25519") {
+        return "tweetnacl";
+    }
+    if (v !== undefined && v.length > 0) {
+        throw new Error(
+            `libvex e2e: invalid LIBVEX_E2E_CRYPTO=${JSON.stringify(v)}. Use fips, tweetnacl, or leave unset to auto-detect from Spire /status`,
+        );
+    }
+    const url = spireStatusUrlFromEnv();
+    if (url === null) {
+        return "tweetnacl";
+    }
+    let res: Response;
+    try {
+        res = await fetch(url, { method: "GET" });
+    } catch {
+        return "tweetnacl";
+    }
+    if (!res.ok) {
+        return "tweetnacl";
+    }
+    const data: unknown = await res.json();
+    if (
+        typeof data !== "object" ||
+        data === null ||
+        !("cryptoProfile" in data)
+    ) {
+        return "tweetnacl";
+    }
+    const cp = (data as { cryptoProfile: unknown }).cryptoProfile;
+    if (cp === "fips" || cp === "tweetnacl") {
+        return cp;
+    }
+    return "tweetnacl";
+}
+
+function e2eClientOptionsBase(): ClientOptions {
+    return {
+        inMemoryDb: true,
+        ...apiUrlOverrideFromEnv(),
+        cryptoProfile: getCryptoProfile(),
+    };
+}
+
+async function e2eGenerateSecretKey(): Promise<string> {
+    return await Client.generateSecretKeyAsync();
+}
+
+async function assertSpireCryptoProfileMatchesTest(): Promise<void> {
+    if (process.env["LIBVEX_E2E_SKIP_STATUS_CHECK"] === "1") {
+        return;
+    }
+    const url = spireStatusUrlFromEnv();
+    if (url === null) {
+        return;
+    }
+    const want = getCryptoProfile();
+    let res: Response;
+    try {
+        res = await fetch(url, { method: "GET" });
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(
+            `libvex e2e: could not GET ${url} (check API_URL; is Spire running?): ${msg}`,
+        );
+    }
+    if (!res.ok) {
+        throw new Error(
+            `libvex e2e: ${url} returned HTTP ${String(res.status)} — Spire not reachable on this base URL?`,
+        );
+    }
+    const data: unknown = await res.json();
+    if (
+        typeof data !== "object" ||
+        data === null ||
+        !("cryptoProfile" in data) ||
+        typeof (data as { cryptoProfile: unknown }).cryptoProfile !== "string"
+    ) {
+        throw new Error(
+            `libvex e2e: Spire /status is missing a string "cryptoProfile" (upgrade Spire) or set LIBVEX_E2E_SKIP_STATUS_CHECK=1 to skip this check`,
+        );
+    }
+    const gotStr = (data as { cryptoProfile: string }).cryptoProfile;
+    if (gotStr !== "fips" && gotStr !== "tweetnacl") {
+        throw new Error(
+            `libvex e2e: Spire /status cryptoProfile is not fips|tweetnacl: ${gotStr}`,
+        );
+    }
+    if (gotStr !== want) {
+        throw new Error(
+            `libvex e2e: Spire is cryptoProfile=${gotStr} (see SPIRE_FIPS + SPK) but this test has getCryptoProfile()=${want}. Use matching keys/scripts (gen-spk.js vs gen-spk-fips.js) and the same mode on client and server.`,
+        );
+    }
+}
 
 export function platformSuite(
     platformName: string,
@@ -30,14 +183,14 @@ export function platformSuite(
         const password = "platform-test-pw";
 
         beforeAll(async () => {
-            const SK = Client.generateSecretKey();
+            const profile = await resolveE2eCryptoProfile();
+            setCryptoProfile(profile);
+            const SK = await e2eGenerateSecretKey();
 
-            const opts: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
+            const opts: ClientOptions = e2eClientOptionsBase();
             const storage = await makeStorage(SK, opts);
             client = await Client.create(SK, opts, storage);
+            await assertSpireCryptoProfileMatchesTest();
         });
 
         afterAll(async () => {
@@ -75,11 +228,8 @@ export function platformSuite(
         });
 
         test("two-user DM", async () => {
-            const SK2 = Client.generateSecretKey();
-            const opts2: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
+            const SK2 = await e2eGenerateSecretKey();
+            const opts2: ClientOptions = e2eClientOptionsBase();
             const storage2 = await makeStorage(SK2, opts2);
             const client2 = await Client.create(SK2, opts2, storage2);
             const username2 = Client.randomUsername();
@@ -112,11 +262,8 @@ export function platformSuite(
         });
 
         test("group messaging in channel", async () => {
-            const SK2 = Client.generateSecretKey();
-            const opts2: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
+            const SK2 = await e2eGenerateSecretKey();
+            const opts2: ClientOptions = e2eClientOptionsBase();
             const storage2 = await makeStorage(SK2, opts2);
             const client2 = await Client.create(SK2, opts2, storage2);
             const username2 = Client.randomUsername();
@@ -184,10 +331,7 @@ export function platformSuite(
             // device key, authenticate without password.
             const deviceKey = client.getKeys().private;
             const deviceID = client.me.device().deviceID;
-            const opts2: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
+            const opts2: ClientOptions = e2eClientOptionsBase();
             const storage2 = await makeStorage(deviceKey, opts2);
             const client2 = await Client.create(deviceKey, opts2, storage2);
 
@@ -293,91 +437,6 @@ export function platformSuite(
             expect(afterDelete.length).toBe(0);
         });
 
-        // TODO: multi-device fan-out requires sender to query fresh device
-        // list before sending. Currently the sender caches one device and
-        // the message only reaches device1.
-        test.todo("multi-device message sync", async () => {
-            const SK2 = Client.generateSecretKey();
-            const opts2: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
-            const storage2 = await makeStorage(SK2, opts2);
-            const device2 = await Client.create(SK2, opts2, storage2);
-
-            // Sender: separate user
-            const SK3 = Client.generateSecretKey();
-            const opts3: ClientOptions = {
-                inMemoryDb: true,
-                ...apiUrlOverrideFromEnv(),
-            };
-            const storage3 = await makeStorage(SK3, opts3);
-            const sender = await Client.create(SK3, opts3, storage3);
-            const senderName = Client.randomUsername();
-
-            try {
-                // Register device2 under same account
-                await device2.login(username, password);
-                await connectAndWait(device2, "device2");
-
-                // Register + connect sender
-                await sender.register(senderName, "sender-pw");
-                await sender.login(senderName, "sender-pw");
-                await connectAndWait(sender, "sender");
-
-                const targetUserID = client.me.user().userID;
-
-                // Both devices listen for the incoming DM
-                const received = { device1: false, device2: false };
-
-                const waitForBoth = new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(() => {
-                        reject(
-                            new Error(
-                                `multi-device sync timed out (d1=${String(received.device1)}, d2=${String(received.device2)})`,
-                            ),
-                        );
-                    }, 15_000);
-                    const check = () => {
-                        if (received.device1 && received.device2) {
-                            clearTimeout(timer);
-                            resolve();
-                        }
-                    };
-
-                    client.on("message", (msg: Message) => {
-                        if (
-                            msg.direction === "incoming" &&
-                            msg.decrypted &&
-                            msg.message === "sync-test"
-                        ) {
-                            received.device1 = true;
-                            check();
-                        }
-                    });
-                    device2.on("message", (msg: Message) => {
-                        if (
-                            msg.direction === "incoming" &&
-                            msg.decrypted &&
-                            msg.message === "sync-test"
-                        ) {
-                            received.device2 = true;
-                            check();
-                        }
-                    });
-                });
-
-                void sender.messages.send(targetUserID, "sync-test");
-                await waitForBoth;
-
-                expect(received.device1).toBe(true);
-                expect(received.device2).toBe(true);
-            } finally {
-                await device2.close().catch(() => {});
-                await sender.close().catch(() => {});
-            }
-        });
-
         test("file upload + download", async () => {
             const [details, key] = await client.files.create(testFile);
             expect(details.fileID).toBeTruthy();
@@ -410,15 +469,31 @@ export function platformSuite(
 }
 
 function apiUrlOverrideFromEnv():
-    | Pick<ClientOptions, "host" | "unsafeHttp">
+    | Pick<ClientOptions, "host" | "unsafeHttp" | "devApiKey">
     | undefined {
     const raw = process.env["API_URL"]?.trim();
-    if (!raw) return undefined;
-    if (/^https?:\/\//i.test(raw)) {
-        const u = new URL(raw);
-        return { host: u.host, unsafeHttp: u.protocol === "http:" };
+    const devKey = process.env["DEV_API_KEY"]?.trim();
+    if (!raw && (devKey === undefined || devKey.length === 0)) {
+        return undefined;
     }
-    return { host: raw, unsafeHttp: true };
+    const fromUrl = (s: string): Pick<ClientOptions, "host" | "unsafeHttp"> => {
+        if (/^https?:\/\//i.test(s)) {
+            const u = new URL(s);
+            return { host: u.host, unsafeHttp: u.protocol === "http:" };
+        }
+        return { host: s, unsafeHttp: true };
+    };
+    if (!raw) {
+        return devKey !== undefined && devKey.length > 0
+            ? { devApiKey: devKey }
+            : undefined;
+    }
+    return {
+        ...fromUrl(raw),
+        ...(devKey !== undefined && devKey.length > 0
+            ? { devApiKey: devKey }
+            : {}),
+    };
 }
 
 /** Shared staging / CI proxies sometimes return 502; retry a few times. */
@@ -442,6 +517,35 @@ async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
     }
     throw last;
 }
+
+/*
+type ClientE2EInternals = { getMail(): Promise<void> };
+type ClientE2EDeviceList = {
+    fetchUserDeviceListOnce(userID: string): Promise<{ deviceID: string }[]>;
+};
+
+async function e2eWaitForPeerDeviceCount(
+    c: Client,
+    userID: string,
+    min: number,
+    totalMs: number,
+): Promise<void> {
+    const t0 = Date.now();
+    const f = c as unknown as ClientE2EDeviceList;
+    for (;;) {
+        if (Date.now() - t0 > totalMs) {
+            throw new Error(
+                `e2e: still fewer than ${String(min)} device(s) for user after ${String(totalMs)}ms`,
+            );
+        }
+        const list = await f.fetchUserDeviceListOnce(userID);
+        if (list.length >= min) {
+            return;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+}
+*/
 
 function connectAndWait(
     c: Client,

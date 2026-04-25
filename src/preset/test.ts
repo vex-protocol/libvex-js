@@ -15,9 +15,16 @@ import type { PlatformPreset } from "./common.js";
 export function testPreset(): PlatformPreset {
     return {
         async createStorage(_dbName, privateKey) {
+            const { getCryptoProfile } = await import("@vex-chat/crypto");
+            const { resolveAtRestAesKeyFromSignKeyHex } =
+                await import("../utils/resolveAtRestAesKey.js");
             const { MemoryStorage } =
                 await import("../__tests__/harness/memory-storage.js");
-            const storage = new MemoryStorage(privateKey);
+            const atRest = await resolveAtRestAesKeyFromSignKeyHex(
+                privateKey,
+                getCryptoProfile(),
+            );
+            const storage = new MemoryStorage(atRest);
             await storage.init();
             return storage;
         },
