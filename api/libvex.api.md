@@ -66,6 +66,7 @@ export class Client {
     once<E extends keyof ClientEvents>(event: E, fn: ClientEvents[E], context?: unknown): this;
     permissions: Permissions_2;
     static randomUsername(): string;
+    reconnectWebsocket(): Promise<void>;
     register(username: string, password: string): Promise<[null | User, Error | null]>;
     // (undocumented)
     removeAllListeners(event?: keyof ClientEvents): this;

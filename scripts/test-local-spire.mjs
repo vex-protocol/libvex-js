@@ -40,13 +40,7 @@ if (!existsSync(vitestEntry)) {
 // the active test name is visible. Some slow cases can take tens of seconds.
 const child = spawn(
     process.execPath,
-    [
-        vitestEntry,
-        "run",
-        "--project",
-        "node",
-        "--reporter=verbose",
-    ],
+    [vitestEntry, "run", "--project", "node", "--reporter=verbose"],
     { cwd: root, env: process.env, stdio: "inherit" },
 );
 child.on("exit", (code) => {
