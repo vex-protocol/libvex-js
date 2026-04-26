@@ -112,10 +112,10 @@
     "dependencies": {
         "@vex-chat/crypto": "2.1.2",
         "@vex-chat/types": "2.0.0",
-        "axios": "1.15.0",
+        "axios": "1.15.2",
         "eventemitter3": "5.0.4",
         "kysely": "0.28.16",
-        "msgpackr": "1.11.8",
+        "msgpackr": "1.11.10",
         "uuid": "14.0.0",
         "zod": "4.3.6"
     },
